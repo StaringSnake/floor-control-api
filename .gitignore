@@ -1,0 +1,37 @@
+# .NET build and test artifacts
+bin/
+obj/
+TestResults/
+coverage/
+coverage.*
+*.trx
+*.coverage
+*.coveragexml
+
+# IDE and editor files
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.local
+appsettings.*.local.json
+secrets.json
+
+# Packages and generated output
+packages/
+artifacts/
+publish/
+*.nupkg
+*.snupkg
+
+# macOS
+.DS_Store
+._*
