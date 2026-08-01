@@ -117,6 +117,38 @@ defmodule FloorControl.Floors do
           %FloorOwnership{user_id: ^user_id} = ownership ->
             ownership
 
+          %FloorOwnership{priority: current_priority} = ownership
+          when priority > current_priority ->
+            acquired_at = DateTime.utc_now()
+            previous_user_id = ownership.user_id
+
+            incoming = %{
+              group_id: group_id,
+              user_id: user_id,
+              priority: priority,
+              acquired_at: acquired_at
+            }
+
+            ownership =
+              ownership
+              |> FloorOwnership.changeset(incoming)
+              |> Repo.update!()
+
+            insert_audit!(
+              %FloorAuditEvent{
+                group_id: group_id,
+                user_id: previous_user_id,
+                priority: current_priority
+              },
+              "preempted",
+              acquired_at,
+              user_id,
+              priority
+            )
+
+            insert_audit!(ownership, "acquired", acquired_at, previous_user_id, current_priority)
+            ownership
+
           ownership ->
             Repo.rollback({:conflict, ownership})
         end
@@ -157,13 +189,21 @@ defmodule FloorControl.Floors do
     |> Repo.insert()
   end
 
-  defp insert_audit!(ownership, event_type, occurred_at \\ DateTime.utc_now()) do
+  defp insert_audit!(
+         ownership,
+         event_type,
+         occurred_at \\ DateTime.utc_now(),
+         counterparty_user_id \\ nil,
+         counterparty_priority \\ nil
+       ) do
     %FloorAuditEvent{}
     |> FloorAuditEvent.changeset(%{
       group_id: ownership.group_id,
       user_id: ownership.user_id,
       event_type: event_type,
       priority: ownership.priority,
+      counterparty_user_id: counterparty_user_id,
+      counterparty_priority: counterparty_priority,
       occurred_at: occurred_at
     })
     |> Repo.insert!()

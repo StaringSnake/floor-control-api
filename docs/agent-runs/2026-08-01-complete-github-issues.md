@@ -155,3 +155,30 @@ Issue #2 implementation and reviews are complete and merged. Issue #3 implementa
 - Acceptance is ACCEPT with 49 tests. Issue #5 is pending merge.
 - CI OpenAPI lint required an explicit `type: object` alongside `nullable: true`;
   that contract-only correction is applied before merge.
+
+## Issue #6 Handoff
+
+- Issue #5 merged in PR #14 at `06c39cf`; issue #6 prioritized preemption is pending review.
+- Strictly higher-priority obtains preempt the current holder in the locked ownership
+  row and atomically append `preempted` then `acquired` audit events.
+- Preemption audit rows record the other holder and priority in
+  `counterparty_user_id` and `counterparty_priority`; ordinary events leave both null.
+
+### Issue #6 Review Findings Disposition
+
+- Consolidated provenance enforcement into one named database check covering paired
+  fields, priority range, allowed event types, distinct users, and mandatory
+  counterparties for `preempted` events; Ecto validation maps the same invariant.
+- The migration uses explicit reversible `up/0` and `down/0`; the constraint is
+  added `NOT VALID` so new writes are protected immediately, then validated in a
+  separate step before completion.
+- Added a real preemption rollback test using a transaction-scoped PostgreSQL test
+  trigger; it verifies the original owner and sole original audit remain after the
+  second audit insert fails. The trigger/function are rolled back with the sandbox.
+- Added exact timestamp equality coverage for paired preemption audits and expanded
+  in-suite priority races to 20 isolated iterations.
+- Restricted audit event types to `acquired`, `released`, `timed_out`, and
+  `preempted` at both Ecto and PostgreSQL boundaries, with direct unknown-value tests.
+- Split rollout into `00200` nullable-column/`NOT VALID` schema expansion and `00201`
+  validation with DDL transactions disabled; validation rollback is a safe no-op and
+  schema rollback removes the constraint and columns.
