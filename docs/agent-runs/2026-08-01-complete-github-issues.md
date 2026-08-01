@@ -156,9 +156,9 @@ Issue #2 implementation and reviews are complete and merged. Issue #3 implementa
 - CI OpenAPI lint required an explicit `type: object` alongside `nullable: true`;
   that contract-only correction is applied before merge.
 
-## Issue #6 Handoff
+## Issue #6 Final Status
 
-- Issue #5 merged in PR #14 at `06c39cf`; issue #6 prioritized preemption is pending review.
+- Issue #5 merged in PR #14 at `06c39cf`; issue #6 merged in PR #15 at `0f0ee90`.
 - Strictly higher-priority obtains preempt the current holder in the locked ownership
   row and atomically append `preempted` then `acquired` audit events.
 - Preemption audit rows record the other holder and priority in
@@ -182,3 +182,5 @@ Issue #2 implementation and reviews are complete and merged. Issue #3 implementa
 - Split rollout into `00200` nullable-column/`NOT VALID` schema expansion and `00201`
   validation with DDL transactions disabled; validation rollback is a safe no-op and
   schema rollback removes the constraint and columns.
+- General, security, and performance reviews approved after reassessment; acceptance
+  is ACCEPT with 56 tests. Issue #6 is complete.
