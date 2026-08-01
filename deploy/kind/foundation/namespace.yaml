@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: floor-control
+  labels:
+    app.kubernetes.io/name: floor-control
+    app.kubernetes.io/part-of: floor-control
