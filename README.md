@@ -24,6 +24,29 @@ configured value. PostgreSQL is persisted in the `postgres_data` Compose volume.
 Stop the stack with `docker compose down`; add
 `-v` when intentionally removing the local database.
 
+### API endpoints
+
+The API contract and interactive documentation are available without internet
+access:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /` | Liveness |
+| `GET /ready` | Database-aware readiness |
+| `GET /groups/{groupId}/floor` | Current floor holder lookup |
+| `POST /groups/{groupId}/floor` | Obtain a floor |
+| `DELETE /groups/{groupId}/floor/{userId}` | Release a floor |
+| `GET /groups/{groupId}/floor/history` | Floor history |
+| `GET /swagger` | Bundled interactive Swagger UI |
+| `GET /openapi.yaml` | Raw OpenAPI contract |
+
+Open [Swagger UI](http://localhost:4000/swagger) to try same-origin requests, or
+download the raw [OpenAPI contract](http://localhost:4000/openapi.yaml). The
+contract uses a server-relative URL, so Try it out targets the host serving the
+documentation rather than a hard-coded development host. These links use the
+same host and port for native development, Docker Compose, and a future Kind
+port-forward or NodePort address.
+
 ### Native development
 
 For a host-based workflow, start PostgreSQL and configure `DATABASE_HOST`,

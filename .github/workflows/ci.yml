@@ -45,6 +45,23 @@ jobs:
       - name: Build production image
         run: docker build --tag floor-control-api:ci .
 
+      - name: Smoke test production image
+        run: >-
+          set -eu;
+          cleanup() { docker rm --force floor-control-api-ci >/dev/null 2>&1 || true; };
+          trap cleanup EXIT;
+          docker run --detach --name floor-control-api-ci --network host
+          -e DATABASE_URL=ecto://postgres:postgres@127.0.0.1:5432/floor_control_test
+          -e SECRET_KEY_BASE=ci-secret-key-base-must-be-at-least-64-characters-long-1234567890
+          -e PHX_HOST=localhost -e PORT=4000 -e DATABASE_SSL=false
+          floor-control-api:ci;
+          attempts=0;
+          until curl --fail --silent http://127.0.0.1:4000/ready >/dev/null; do
+          attempts=$((attempts + 1));
+          if [ "$attempts" -ge 60 ]; then docker logs floor-control-api-ci; exit 1; fi;
+          sleep 2; done;
+          BASE_URL=http://127.0.0.1:4000 ./script/swagger_smoke.sh
+
       - name: Validate OpenAPI contract
         run: >-
           docker run --rm

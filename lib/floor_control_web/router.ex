@@ -5,6 +5,9 @@ defmodule FloorControlWeb.Router do
     plug :accepts, ["json"]
   end
 
+  get "/swagger", FloorControlWeb.SwaggerController, :index
+  get "/openapi.yaml", FloorControlWeb.SwaggerController, :openapi
+
   scope "/", FloorControlWeb do
     pipe_through :api
     get "/", HealthController, :index
