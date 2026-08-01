@@ -3,7 +3,7 @@ defmodule FloorControlWeb.Endpoint do
 
   plug Plug.RequestId
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
-  plug Plug.Parsers, parsers: [:urlencoded, :multipart, :json], json_decoder: Jason
+  plug FloorControlWeb.JSONParser
   plug Plug.MethodOverride
   plug Plug.Head
   plug FloorControlWeb.Router

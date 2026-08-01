@@ -67,20 +67,21 @@ paths:
   /groups/{groupId}/floor:
     post:
       summary: Obtain the Floor (Push to Talk)
-      description: Allows a user to request and obtain the "floor" for a specified radio group. Only one user can hold the floor at a time.
+      description: Allows a user to request and obtain the floor for a specified radio group. IDs are trimmed, must be non-empty, and are limited to 255 characters. An occupied floor always conflicts in this issue; preemption is not performed. An omitted path segment does not match this operation and returns the standard 404 response.
       operationId: obtainFloor
-      tags:
-        - Floor Control
+      tags: [Floor Control]
       parameters:
         - name: groupId
           in: path
-          description: The ID of the group for which to obtain the floor.
+          description: The trimmed, non-empty ID of the group.
           required: true
           schema:
             type: string
+            minLength: 1
+            maxLength: 255
           example: group-alpha-123
       requestBody:
-        description: User ID requesting the floor.
+        description: User and optional priority requesting the floor.
         required: true
         content:
           application/json:
@@ -88,52 +89,59 @@ paths:
               $ref: '#/components/schemas/UserRequest'
       responses:
         '200':
-          description: Successfully obtained the floor.
+          description: Successfully obtained the floor. Repeated obtains by the current holder are idempotent.
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  message:
-                    type: string
-                    example: Floor obtained by user-456 for group group-alpha-123
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Floor obtained by user-456 for group group-alpha-123
         '400':
-          description: Bad Request - Missing or invalid userId.
+          description: Missing, blank, or invalid identifier, priority, request body, or JSON.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
               example:
-                message: 'Invalid request: userId is required'
+                message: userId must be a non-empty string
         '409':
-          description: Conflict - Floor is currently held by another user.
+          description: The floor is currently held by another user.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
               example:
                 message: Floor is currently held by user-789 for group group-alpha-123
+        '404':
+          description: The path is not found, including an omitted groupId path segment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /groups/{groupId}/floor/{userId}:
     delete:
       summary: Release the Floor
-      description: Allows a user to release the floor they are holding for a specified group.
+      description: Allows the specified current holder to release the floor. IDs are trimmed, must be non-empty, and are limited to 255 characters. An omitted path segment does not match this operation and returns the standard 404 response.
       operationId: releaseFloor
-      tags:
-        - Floor Control
+      tags: [Floor Control]
       parameters:
         - name: groupId
           in: path
-          description: The ID of the group for which to release the floor.
+          description: The trimmed, non-empty ID of the group.
           required: true
           schema:
             type: string
+            minLength: 1
+            maxLength: 255
           example: group-alpha-123
         - name: userId
           in: path
-          description: The ID of the user releasing the floor.
+          description: The trimmed, non-empty ID of the releasing user.
           required: true
           schema:
             type: string
+            minLength: 1
+            maxLength: 255
           example: user-456
       responses:
         '200':
@@ -141,32 +149,58 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  message:
-                    type: string
-                    example: Floor released by user-456 for group group-alpha-123
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Floor released by user-456 for group group-alpha-123
+        '400':
+          description: Missing, blank, or whitespace-only identifier.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                message: userId must be a non-empty string
         '403':
-          description: Forbidden - The requesting user does not hold the floor.
+          description: The specified user does not hold the floor.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
               example:
                 message: User user-456 does not hold the floor for group group-alpha-123
+        '404':
+          description: The path is not found, including an omitted groupId or userId path segment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 components:
   schemas:
     UserRequest:
       type: object
-      required:
-        - userId
+      required: [userId]
       properties:
         userId:
           type: string
-          description: The unique identifier for the user.
+          minLength: 1
+          maxLength: 255
+          description: The trimmed, non-empty user identifier.
           example: user-456
+        priority:
+          type: integer
+          minimum: 1
+          maximum: 10
+          default: 1
+          description: Request priority. Equal or lower priorities conflict with the current holder.
+    MessageResponse:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
     ErrorResponse:
       type: object
+      required: [message]
       properties:
         message:
           type: string
