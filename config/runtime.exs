@@ -1,6 +1,12 @@
 import Config
 
 if config_env() == :prod do
+  floor_timeout_ms =
+    System.get_env("FLOOR_TIMEOUT_SECONDS", "30")
+    |> FloorControl.FloorTimeout.parse_timeout_seconds!()
+
+  config :floor_control, :floor_timeout_ms, floor_timeout_ms
+
   database_url = System.get_env("DATABASE_URL") || raise "DATABASE_URL is missing"
   secret_key_base = System.get_env("SECRET_KEY_BASE") || raise "SECRET_KEY_BASE is missing"
   host = System.get_env("PHX_HOST", "localhost")

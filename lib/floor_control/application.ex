@@ -6,6 +6,8 @@ defmodule FloorControl.Application do
     children = [
       FloorControl.Repo,
       {Phoenix.PubSub, name: FloorControl.PubSub},
+      {FloorControl.FloorTimeout,
+       [schedule?: Application.get_env(:floor_control, :floor_timeout_schedule, true)]},
       FloorControlWeb.Endpoint
     ]
 

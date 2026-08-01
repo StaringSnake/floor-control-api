@@ -3,6 +3,8 @@ defmodule FloorControl.Floors do
 
   alias FloorControl.{FloorAuditEvent, FloorOwnership, Repo}
 
+  @expiration_batch_size 100
+
   @type result ::
           {:ok, FloorOwnership.t()}
           | {:error, :conflict, FloorOwnership.t()}
@@ -42,6 +44,46 @@ defmodule FloorControl.Floors do
         end
       end)
       |> normalize_transaction_result()
+    end
+  end
+
+  @doc "Releases expired ownerships and reports whether the bounded batch was full."
+  @spec expire_expired(DateTime.t(), pos_integer()) ::
+          {:ok, non_neg_integer(), boolean()}
+  def expire_expired(now, timeout_ms) do
+    cutoff = DateTime.add(now, -timeout_ms, :millisecond)
+
+    Repo.transaction(fn ->
+      expired_count =
+        expired_ownerships(cutoff)
+        |> Enum.count(&expire_ownership(&1, cutoff, now))
+
+      {expired_count, expired_count == @expiration_batch_size}
+    end)
+    |> case do
+      {:ok, {count, full_batch?}} -> {:ok, count, full_batch?}
+    end
+  end
+
+  defp expired_ownerships(cutoff) do
+    # The candidates are locked by this transaction, so obtain/release cannot
+    # replace or delete them until the audit and ownership delete commit.
+    Repo.all(
+      from ownership in FloorOwnership,
+        where: ownership.acquired_at <= ^cutoff,
+        order_by: [asc: ownership.acquired_at, asc: ownership.id],
+        limit: ^@expiration_batch_size,
+        lock: "FOR UPDATE SKIP LOCKED"
+    )
+  end
+
+  defp expire_ownership(ownership, cutoff, now) do
+    if DateTime.compare(ownership.acquired_at, cutoff) in [:lt, :eq] do
+      insert_audit!(ownership, "timed_out", now)
+      Repo.delete!(ownership)
+      true
+    else
+      false
     end
   end
 
@@ -106,14 +148,14 @@ defmodule FloorControl.Floors do
     |> Repo.insert()
   end
 
-  defp insert_audit!(ownership, event_type) do
+  defp insert_audit!(ownership, event_type, occurred_at \\ DateTime.utc_now()) do
     %FloorAuditEvent{}
     |> FloorAuditEvent.changeset(%{
       group_id: ownership.group_id,
       user_id: ownership.user_id,
       event_type: event_type,
       priority: ownership.priority,
-      occurred_at: DateTime.utc_now()
+      occurred_at: occurred_at
     })
     |> Repo.insert!()
   end
