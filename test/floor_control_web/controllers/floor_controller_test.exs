@@ -70,6 +70,19 @@ defmodule FloorControlWeb.FloorControllerTest do
     assert json_response(conn, 403)["message"] =~ "does not hold"
   end
 
+  test "preempts over HTTP only with a strictly higher priority", %{conn: conn} do
+    assert %{"message" => _} =
+             conn
+             |> post_json("/groups/group-1/floor", %{userId: "user-1", priority: 3})
+             |> json_response(200)
+
+    conn = post_json(conn, "/groups/group-1/floor", %{userId: "user-2", priority: 7})
+    assert json_response(conn, 200)["message"] =~ "obtained by user-2"
+
+    conn = post_json(build_conn(), "/groups/group-1/floor", %{userId: "user-3", priority: 7})
+    assert json_response(conn, 409)["message"] =~ "currently held by user-2"
+  end
+
   test "same-holder obtain is idempotent over HTTP", %{conn: conn} do
     assert %{"message" => _} =
              conn |> post_json("/groups/group-1/floor", %{userId: "user-1"}) |> json_response(200)

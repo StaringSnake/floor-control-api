@@ -17,6 +17,16 @@ defmodule FloorControl.FloorAuditEventTest do
                )
                """
              ).rows
+
+    assert [[true]] =
+             Ecto.Adapters.SQL.query!(
+               Repo,
+               """
+               SELECT convalidated
+               FROM pg_constraint
+               WHERE conname = 'floor_audit_events_counterparty_provenance'
+               """
+             ).rows
   end
 
   test "audit changeset requires fields and defaults priority" do
@@ -56,6 +66,113 @@ defmodule FloorControl.FloorAuditEventTest do
                priority: priority,
                occurred_at: @occurred_at
              }).valid?
+    end
+  end
+
+  test "audit changeset restricts event types and enforces coherent provenance" do
+    attrs = %{
+      group_id: "group-1",
+      user_id: "user-1",
+      event_type: "preempted",
+      priority: 3,
+      occurred_at: @occurred_at
+    }
+
+    assert FloorAuditEvent.changeset(
+             %FloorAuditEvent{},
+             Map.merge(attrs, %{counterparty_user_id: "user-2", counterparty_priority: 7})
+           ).valid?
+
+    refute FloorAuditEvent.changeset(
+             %FloorAuditEvent{},
+             Map.put(attrs, :counterparty_user_id, "user-2")
+           ).valid?
+
+    refute FloorAuditEvent.changeset(
+             %FloorAuditEvent{},
+             Map.merge(attrs, %{counterparty_user_id: "user-2", counterparty_priority: 11})
+           ).valid?
+
+    refute FloorAuditEvent.changeset(
+             %FloorAuditEvent{},
+             Map.put(attrs, :counterparty_priority, 7)
+           ).valid?
+
+    refute FloorAuditEvent.changeset(
+             %FloorAuditEvent{},
+             Map.merge(attrs, %{counterparty_user_id: "user-1", counterparty_priority: 7})
+           ).valid?
+
+    refute FloorAuditEvent.changeset(%FloorAuditEvent{}, %{
+             group_id: "group-1",
+             user_id: "user-1",
+             event_type: "released",
+             priority: 3,
+             counterparty_user_id: "user-2",
+             counterparty_priority: 7,
+             occurred_at: @occurred_at
+           }).valid?
+
+    assert FloorAuditEvent.changeset(%FloorAuditEvent{}, %{
+             group_id: "group-1",
+             user_id: "user-1",
+             event_type: "acquired",
+             priority: 3,
+             occurred_at: @occurred_at
+           }).valid?
+
+    refute FloorAuditEvent.changeset(%FloorAuditEvent{}, %{
+             group_id: "group-1",
+             user_id: "user-1",
+             event_type: "unknown",
+             priority: 3,
+             occurred_at: @occurred_at
+           }).valid?
+  end
+
+  test "database enforces event vocabulary and coherent provenance" do
+    assert_raise Ecto.ConstraintError, fn ->
+      Repo.insert!(%FloorAuditEvent{
+        group_id: "group-1",
+        user_id: "user-1",
+        event_type: "preempted",
+        priority: 3,
+        counterparty_user_id: "user-2",
+        occurred_at: @occurred_at
+      })
+    end
+
+    assert_raise Ecto.ConstraintError, fn ->
+      Repo.insert!(%FloorAuditEvent{
+        group_id: "group-1",
+        user_id: "user-1",
+        event_type: "preempted",
+        priority: 3,
+        counterparty_user_id: "user-2",
+        counterparty_priority: 11,
+        occurred_at: @occurred_at
+      })
+    end
+
+    for event_attrs <- [
+          %{event_type: "unknown"},
+          %{event_type: "preempted", counterparty_priority: 7},
+          %{event_type: "preempted", counterparty_user_id: "user-1", counterparty_priority: 7},
+          %{event_type: "released", counterparty_user_id: "user-2", counterparty_priority: 7}
+        ] do
+      assert_raise Ecto.ConstraintError, fn ->
+        Repo.insert!(
+          struct!(
+            %FloorAuditEvent{
+              group_id: "group-1",
+              user_id: "user-1",
+              priority: 3,
+              occurred_at: @occurred_at
+            },
+            event_attrs
+          )
+        )
+      end
     end
   end
 

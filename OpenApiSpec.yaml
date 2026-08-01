@@ -111,7 +111,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
     post:
       summary: Obtain the Floor (Push to Talk)
-      description: Allows a user to request and obtain the floor for a specified radio group. IDs are trimmed, must be non-empty, and are limited to 255 characters. An occupied floor always conflicts in this issue; preemption is not performed. An omitted path segment does not match this operation and returns the standard 404 response.
+      description: Allows a user to request and obtain the floor for a specified radio group. IDs are trimmed, must be non-empty, and are limited to 255 characters. A request with strictly higher priority preempts the current holder atomically. Equal or lower priority requests conflict. An omitted path segment does not match this operation and returns the standard 404 response.
       operationId: obtainFloor
       tags: [Floor Control]
       parameters:
@@ -149,13 +149,15 @@ paths:
               example:
                 message: userId must be a non-empty string
         '409':
-          description: The floor is currently held by another user.
+          description: The floor is currently held by another user with equal or higher priority.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-              example:
-                message: Floor is currently held by user-789 for group group-alpha-123
+              examples:
+                equalOrLowerPriority:
+                  value:
+                    message: Floor is currently held by user-789 for group group-alpha-123
         '404':
           description: The path is not found, including an omitted groupId path segment.
           content:

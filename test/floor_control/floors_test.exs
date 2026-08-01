@@ -20,6 +20,84 @@ defmodule FloorControl.FloorsTest do
     assert Repo.aggregate(FloorAuditEvent, :count) == 1
   end
 
+  test "strictly higher priority preempts and records both sides in order" do
+    assert {:ok, original} = Floors.obtain("group-1", %{user_id: "user-1", priority: 3})
+    assert {:ok, replacement} = Floors.obtain("group-1", %{user_id: "user-2", priority: 7})
+
+    assert replacement.user_id == "user-2"
+    assert replacement.priority == 7
+    assert DateTime.compare(replacement.acquired_at, original.acquired_at) in [:gt, :eq]
+
+    assert [
+             %{event_type: "acquired", user_id: "user-1", priority: 3},
+             %{
+               event_type: "preempted",
+               user_id: "user-1",
+               priority: 3,
+               counterparty_user_id: "user-2",
+               counterparty_priority: 7
+             },
+             %{
+               event_type: "acquired",
+               user_id: "user-2",
+               priority: 7,
+               counterparty_user_id: "user-1",
+               counterparty_priority: 3
+             }
+           ] = audit_events("group-1")
+
+    [_, preempted, acquired] = audit_events_with_timestamps("group-1")
+    assert preempted.occurred_at == acquired.occurred_at
+  end
+
+  test "preemption rolls back ownership and audit events when the second audit fails" do
+    assert {:ok, original} = Floors.obtain("group-1", %{user_id: "user-1", priority: 3})
+
+    Ecto.Adapters.SQL.query!(
+      Repo,
+      """
+      CREATE FUNCTION floor_control_test_reject_preemption_acquired() RETURNS trigger
+      LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.event_type = 'acquired' AND NEW.counterparty_user_id IS NOT NULL THEN
+          RAISE EXCEPTION 'test rejection of preemption acquired audit';
+        END IF;
+        RETURN NEW;
+      END;
+      $$;
+      """
+    )
+
+    Ecto.Adapters.SQL.query!(
+      Repo,
+      """
+      CREATE TRIGGER floor_control_test_reject_preemption_acquired_trigger
+      BEFORE INSERT ON floor_audit_events
+      FOR EACH ROW EXECUTE FUNCTION floor_control_test_reject_preemption_acquired()
+      """
+    )
+
+    assert_raise Postgrex.Error, ~r/test rejection of preemption acquired audit/, fn ->
+      Floors.obtain("group-1", %{user_id: "user-2", priority: 7})
+    end
+
+    assert Repo.get(FloorOwnership, original.id) == original
+    assert [%{event_type: "acquired", user_id: "user-1"}] = audit_events("group-1")
+  end
+
+  test "equal and lower priority requests conflict without changing ownership" do
+    assert {:ok, original} = Floors.obtain("group-1", %{user_id: "user-1", priority: 5})
+
+    assert {:error, :conflict, %{user_id: "user-1", priority: 5}} =
+             Floors.obtain("group-1", %{user_id: "user-2", priority: 5})
+
+    assert {:error, :conflict, %{user_id: "user-1", priority: 5}} =
+             Floors.obtain("group-1", %{user_id: "user-3", priority: 4})
+
+    assert Repo.get(FloorOwnership, original.id).user_id == "user-1"
+    assert audit_count("group-1") == 1
+  end
+
   test "current holder lookup returns the owner without side effects" do
     assert {:ok, ownership} = Floors.obtain("group-1", %{user_id: "user-1", priority: 7})
     assert {:ok, ^ownership} = Floors.current_holder(" group-1 ")
@@ -266,8 +344,78 @@ defmodule FloorControl.FloorsTest do
       results = concurrent_obtains(group_id, ["user-1", "user-1"])
 
       assert Enum.count(results, &match?({:ok, _}, &1)) == 2
+      assert Enum.count(results, &match?({:error, :conflict, _}, &1)) == 0
       assert ownership_count(group_id) == 1
       assert audit_count(group_id) == 1
+    end
+  end
+
+  test "simultaneous preemptions serialize and retain the highest priority holder" do
+    for group_number <- 1..20 do
+      group_id = "priority-race-group-#{group_number}"
+      assert {:ok, _} = Floors.obtain(group_id, %{user_id: "user-1", priority: 1})
+
+      results = concurrent_priority_obtains(group_id, [{"user-2", 5}, {"user-3", 9}])
+
+      ok_count = Enum.count(results, &match?({:ok, _}, &1))
+      conflict_count = Enum.count(results, &match?({:error, :conflict, _}, &1))
+
+      assert {ok_count, conflict_count} in [{2, 0}, {1, 1}]
+      assert {:ok, %{user_id: "user-3", priority: 9}} = Floors.current_holder(group_id)
+
+      case {ok_count, conflict_count} do
+        {2, 0} ->
+          assert [
+                   %{event_type: "acquired", user_id: "user-1", priority: 1},
+                   %{
+                     event_type: "preempted",
+                     user_id: "user-1",
+                     priority: 1,
+                     counterparty_user_id: "user-2",
+                     counterparty_priority: 5
+                   },
+                   %{
+                     event_type: "acquired",
+                     user_id: "user-2",
+                     priority: 5,
+                     counterparty_user_id: "user-1",
+                     counterparty_priority: 1
+                   },
+                   %{
+                     event_type: "preempted",
+                     user_id: "user-2",
+                     priority: 5,
+                     counterparty_user_id: "user-3",
+                     counterparty_priority: 9
+                   },
+                   %{
+                     event_type: "acquired",
+                     user_id: "user-3",
+                     priority: 9,
+                     counterparty_user_id: "user-2",
+                     counterparty_priority: 5
+                   }
+                 ] = audit_events(group_id)
+
+        {1, 1} ->
+          assert [
+                   %{event_type: "acquired", user_id: "user-1", priority: 1},
+                   %{
+                     event_type: "preempted",
+                     user_id: "user-1",
+                     priority: 1,
+                     counterparty_user_id: "user-3",
+                     counterparty_priority: 9
+                   },
+                   %{
+                     event_type: "acquired",
+                     user_id: "user-3",
+                     priority: 9,
+                     counterparty_user_id: "user-1",
+                     counterparty_priority: 1
+                   }
+                 ] = audit_events(group_id)
+      end
     end
   end
 
@@ -294,6 +442,29 @@ defmodule FloorControl.FloorsTest do
     Enum.map(tasks, &Task.await(&1, 5_000))
   end
 
+  defp concurrent_priority_obtains(group_id, user_priorities) do
+    parent = self()
+
+    tasks =
+      for {user_id, priority} <- user_priorities do
+        task =
+          Task.async(fn ->
+            send(parent, {:ready, self()})
+
+            receive do
+              :start -> Floors.obtain(group_id, %{user_id: user_id, priority: priority})
+            end
+          end)
+
+        Ecto.Adapters.SQL.Sandbox.allow(Repo, self(), task.pid)
+        task
+      end
+
+    for _task <- tasks, do: assert_receive({:ready, _pid})
+    Enum.each(tasks, &send(&1.pid, :start))
+    Enum.map(tasks, &Task.await(&1, 5_000))
+  end
+
   defp ownership_count(group_id) do
     FloorOwnership
     |> where([ownership], ownership.group_id == ^group_id)
@@ -304,6 +475,39 @@ defmodule FloorControl.FloorsTest do
     FloorAuditEvent
     |> where([event], event.group_id == ^group_id)
     |> Repo.aggregate(:count)
+  end
+
+  defp audit_events(group_id) do
+    FloorAuditEvent
+    |> where([event], event.group_id == ^group_id)
+    |> order_by([event], asc: event.occurred_at, asc: event.id)
+    |> Repo.all()
+    |> Enum.map(
+      &Map.take(&1, [
+        :event_type,
+        :user_id,
+        :priority,
+        :counterparty_user_id,
+        :counterparty_priority
+      ])
+    )
+  end
+
+  defp audit_events_with_timestamps(group_id) do
+    FloorAuditEvent
+    |> where([event], event.group_id == ^group_id)
+    |> order_by([event], asc: event.occurred_at, asc: event.id)
+    |> Repo.all()
+    |> Enum.map(
+      &Map.take(&1, [
+        :event_type,
+        :user_id,
+        :priority,
+        :counterparty_user_id,
+        :counterparty_priority,
+        :occurred_at
+      ])
+    )
   end
 
   defp timed_out_count do
