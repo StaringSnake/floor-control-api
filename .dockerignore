@@ -1,0 +1,14 @@
+.git
+.github
+.opencode
+_build
+deps
+doc
+erl_crash.dump
+.env
+.env.*
+!.env.example
+Dockerfile*
+docker-compose*.yml
+test
+docs/agent-runs

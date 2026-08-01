@@ -26,6 +26,10 @@ appsettings.*.local.json
 secrets.json
 
 # Packages and generated output
+/_build/
+/deps/
+/doc/
+/erl_crash.dump
 packages/
 artifacts/
 publish/

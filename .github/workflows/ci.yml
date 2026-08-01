@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16.4-bookworm@sha256:e62fbf9d3e2b49816a32c400ed2dba83e3b361e6833e624024309c35d334b412
+        env:
+          POSTGRES_DB: floor_control_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d floor_control_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Format, compile, and test
+        run: >-
+          docker run --rm --network host
+          -e MIX_ENV=test
+          -e DATABASE_HOST=127.0.0.1
+          -e DATABASE_USER=postgres
+          -e DATABASE_PASSWORD=postgres
+          -e DATABASE_NAME=floor_control_test
+          -v "$GITHUB_WORKSPACE:/workspace"
+          -w /workspace
+          hexpm/elixir:1.16.3-erlang-26.2.5.21-debian-bookworm-20260713-slim@sha256:b63e3236fbf5c806b4143367cd29748556a09268bf62f7d498ce14019a978cad
+          sh -c 'mix local.hex 2.5.1 --force && mix local.rebar rebar3 https://github.com/erlang/rebar3/releases/download/3.25.1/rebar3 --sha512 69073f6ad163f74971545015238614c327893960c1b3f26df5377df135c773a0716b48b65c2a48cef878f185dd92805abc69894adfa3fd27a90c62a64ba371e2 --force && mix deps.get --locked && mix format --check-formatted && mix compile --warnings-as-errors && mix test'
+
+      - name: Build production image
+        run: docker build --tag floor-control-api:ci .
+
+      - name: Validate OpenAPI contract
+        run: >-
+          docker run --rm
+          -v "$GITHUB_WORKSPACE:/work:ro"
+          redocly/cli:1.25.13@sha256:5ba4171da3ef3b17c855358b00858c93d7efdea0539815b486ac7c7bfe57e18b
+          lint --skip-rule security-defined --skip-rule info-license --skip-rule no-server-example.com /work/OpenApiSpec.yaml

@@ -2,9 +2,9 @@
 
 ## Purpose
 
-This repository will contain a REST API that manages floor ownership for users
-in radio groups. It is currently a challenge bootstrap with no implementation
-stack selected.
+This repository contains the foundation for a REST API that manages floor
+ownership for users in radio groups. Business floor-control behavior is added in
+later issue slices.
 
 ## Architecture
 
@@ -13,18 +13,21 @@ stack selected.
 - `README.md`: repository overview and links to the challenge documents.
 - `opencode.json` and `.opencode/`: OpenCode harness configuration and agent link.
 - `docs/agent-runs/`: version-controlled harness run journals.
-- No application source or project files exist yet.
+- `mix.exs`: Elixir/Mix project definition.
+- `lib/`: Phoenix endpoint, router, application supervision, and Ecto Repo.
+- `config/`: environment-specific application configuration.
+- `test/`: ExUnit and Phoenix connection test support.
 
 ## Commands
 
 | Purpose | Command |
 |---|---|
-| Build | Not available; no implementation has been selected. |
-| Test | Not available; no test project exists. |
-| Run | Not available; no application exists. |
-| Migrations | Not available; no persistence technology has been selected. |
-| CI | Not available; no pipeline exists. |
-| Deployment | Not available; no deployment configuration exists. |
+| Build | `mix compile --warnings-as-errors` |
+| Test | `mix test` |
+| Run | `mix phx.server` |
+| Migrations | `mix ecto.setup` / `mix ecto.migrate` |
+| CI | `.github/workflows/ci.yml` |
+| Deployment | `Dockerfile` and `docker-compose.yml` |
 
 ## Constraints
 
@@ -34,7 +37,7 @@ stack selected.
 - Floor control excludes audio broadcasting.
 - The eventual application must be containerized with Docker and include run
   instructions.
-- The challenge permits any implementation language; none is selected yet.
+- The implementation stack is Elixir, Phoenix, Ecto, and PostgreSQL.
 - Bonus features in the brief are optional and are not part of this bootstrap.
 
 ## Domain Language
