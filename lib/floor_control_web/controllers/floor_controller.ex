@@ -29,6 +29,16 @@ defmodule FloorControlWeb.FloorController do
     end
   end
 
+  def current_holder(conn, %{"groupId" => group_id}) do
+    case Floors.current_holder(group_id) do
+      {:ok, ownership} ->
+        json(conn, %{holder: holder_response(ownership)})
+
+      {:error, {:validation, message}} ->
+        error(conn, :bad_request, message)
+    end
+  end
+
   def release(conn, %{"groupId" => group_id, "userId" => user_id}) do
     case Floors.release(group_id, user_id) do
       {:ok, ownership} ->
@@ -48,5 +58,15 @@ defmodule FloorControlWeb.FloorController do
     conn
     |> put_status(status)
     |> json(%{message: message})
+  end
+
+  defp holder_response(nil), do: nil
+
+  defp holder_response(ownership) do
+    %{
+      userId: ownership.user_id,
+      priority: ownership.priority,
+      acquiredAt: ownership.acquired_at
+    }
   end
 end

@@ -20,6 +20,36 @@ defmodule FloorControl.FloorsTest do
     assert Repo.aggregate(FloorAuditEvent, :count) == 1
   end
 
+  test "current holder lookup returns the owner without side effects" do
+    assert {:ok, ownership} = Floors.obtain("group-1", %{user_id: "user-1", priority: 7})
+    assert {:ok, ^ownership} = Floors.current_holder(" group-1 ")
+    assert Repo.aggregate(FloorAuditEvent, :count) == 1
+  end
+
+  test "current holder lookup returns empty for an unoccupied group" do
+    assert {:ok, nil} = Floors.current_holder("group-1")
+    assert Repo.aggregate(FloorOwnership, :count) == 0
+    assert Repo.aggregate(FloorAuditEvent, :count) == 0
+  end
+
+  test "current holder lookup returns empty after release and timeout" do
+    assert {:ok, _ownership} = Floors.obtain("group-1", %{user_id: "user-1"})
+    assert {:ok, _released} = Floors.release("group-1", "user-1")
+    assert {:ok, nil} = Floors.current_holder("group-1")
+
+    assert {:ok, ownership} = Floors.obtain("group-2", %{user_id: "user-2"})
+    now = DateTime.add(ownership.acquired_at, 31_000, :millisecond)
+    assert {:ok, 1, false} = Floors.expire_expired(now, 30_000)
+    assert {:ok, nil} = Floors.current_holder("group-2")
+  end
+
+  test "current holder lookup validates identifiers without querying or writing" do
+    assert {:error, {:validation, _}} = Floors.current_holder("   ")
+    assert {:error, {:validation, _}} = Floors.current_holder(String.duplicate("a", 256))
+    assert Repo.aggregate(FloorOwnership, :count) == 0
+    assert Repo.aggregate(FloorAuditEvent, :count) == 0
+  end
+
   test "automatic mailbox sweep releases expired ownership and preserves a fresh owner" do
     now = ~U[2026-08-01 12:00:00.000001Z]
     assert {:ok, ownership} = Floors.obtain("group-1", %{user_id: "user-1"})

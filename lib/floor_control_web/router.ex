@@ -9,6 +9,7 @@ defmodule FloorControlWeb.Router do
     pipe_through :api
     get "/", HealthController, :index
     get "/ready", HealthController, :ready
+    get "/groups/:groupId/floor", FloorController, :current_holder
     post "/groups/:groupId/floor", FloorController, :obtain
     delete "/groups/:groupId/floor/:userId", FloorController, :release
   end

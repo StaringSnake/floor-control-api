@@ -23,6 +23,42 @@ defmodule FloorControlWeb.FloorControllerTest do
            }
   end
 
+  test "looks up an occupied floor with its current holder", %{conn: conn} do
+    assert {:ok, ownership} = Floors.obtain("group-1", %{user_id: "user-1", priority: 7})
+
+    conn = get(conn, "/groups/group-1/floor")
+
+    assert json_response(conn, 200) == %{
+             "holder" => %{
+               "userId" => "user-1",
+               "priority" => 7,
+               "acquiredAt" => DateTime.to_iso8601(ownership.acquired_at)
+             }
+           }
+
+    assert Repo.aggregate(FloorAuditEvent, :count) == 1
+  end
+
+  test "looks up an unoccupied floor as a nullable holder", %{conn: conn} do
+    assert json_response(get(conn, "/groups/group-1/floor"), 200) == %{"holder" => nil}
+  end
+
+  test "lookup returns an empty holder after release and timeout", %{conn: conn} do
+    assert {:ok, _ownership} = Floors.obtain("group-1", %{user_id: "user-1"})
+    assert {:ok, _} = Floors.release("group-1", "user-1")
+    assert json_response(get(conn, "/groups/group-1/floor"), 200) == %{"holder" => nil}
+
+    assert {:ok, ownership} = Floors.obtain("group-2", %{user_id: "user-2"})
+
+    assert {:ok, 1, false} =
+             Floors.expire_expired(
+               DateTime.add(ownership.acquired_at, 31_000, :millisecond),
+               30_000
+             )
+
+    assert json_response(get(build_conn(), "/groups/group-2/floor"), 200) == %{"holder" => nil}
+  end
+
   test "returns conflict for another user and forbidden for a non-holder release", %{conn: conn} do
     assert %{"message" => _} =
              conn |> post_json("/groups/group-1/floor", %{userId: "user-1"}) |> json_response(200)
@@ -76,6 +112,20 @@ defmodule FloorControlWeb.FloorControllerTest do
 
     conn = delete(build_conn(), "/groups/%20%20/floor/user-1")
     assert json_response(conn, 400)["message"] =~ "groupId"
+  end
+
+  test "returns bad request for invalid lookup identifiers", %{conn: conn} do
+    assert json_response(get(conn, "/groups/%20%20/floor"), 400)["message"] =~ "groupId"
+
+    oversized_id = String.duplicate("a", 256)
+
+    assert json_response(get(build_conn(), "/groups/#{oversized_id}/floor"), 400)["message"] =~
+             "groupId"
+  end
+
+  test "omitted lookup path segments remain standard not-found routes", %{conn: conn} do
+    assert json_response(get(conn, "/groups/group-1"), 404)["message"]
+    assert json_response(get(build_conn(), "/groups//floor"), 404)["message"]
   end
 
   test "omitted path segments remain standard not-found routes", %{conn: conn} do

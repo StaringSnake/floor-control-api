@@ -65,6 +65,50 @@ paths:
               example:
                 status: unavailable
   /groups/{groupId}/floor:
+    get:
+      summary: Look up the current Floor holder
+      description: Returns the current holder for a group. A valid request always returns 200; the holder is null when the floor is unoccupied. IDs are trimmed, must be non-empty, and are limited to 255 characters. The acquiredAt value is an ISO 8601 UTC date-time with microsecond precision.
+      operationId: currentFloorHolder
+      tags: [Floor Control]
+      parameters:
+        - name: groupId
+          in: path
+          description: The trimmed, non-empty ID of the group.
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 255
+          example: group-alpha-123
+      responses:
+        '200':
+          description: The current holder, or null when the floor is unoccupied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentHolderResponse'
+              examples:
+                occupied:
+                  value:
+                    holder:
+                      userId: user-456
+                      priority: 7
+                      acquiredAt: '2026-08-01T12:00:00.000001Z'
+                unoccupied:
+                  value:
+                    holder: null
+        '400':
+          description: Missing, blank, or invalid group identifier.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: The path is not found, including an omitted groupId path segment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     post:
       summary: Obtain the Floor (Push to Talk)
       description: Allows a user to request and obtain the floor for a specified radio group. IDs are trimmed, must be non-empty, and are limited to 255 characters. An occupied floor always conflicts in this issue; preemption is not performed. An omitted path segment does not match this operation and returns the standard 404 response.
@@ -176,6 +220,27 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
 components:
   schemas:
+    CurrentHolderResponse:
+      type: object
+      required: [holder]
+      properties:
+        holder:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/Holder'
+    Holder:
+      type: object
+      required: [userId, priority, acquiredAt]
+      properties:
+        userId:
+          type: string
+        priority:
+          type: integer
+        acquiredAt:
+          type: string
+          format: date-time
+          description: ISO 8601 UTC date-time with microsecond precision.
     UserRequest:
       type: object
       required: [userId]
