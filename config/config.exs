@@ -1,6 +1,7 @@
 import Config
 
 config :floor_control, ecto_repos: [FloorControl.Repo]
+config :floor_control, :floor_timeout_ms, 30_000
 
 config :floor_control, FloorControlWeb.Endpoint,
   adapter: Bandit.PhoenixAdapter,

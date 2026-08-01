@@ -82,4 +82,51 @@ Implement floor ownership persistence and obtain/release operations for radio gr
 
 ## Outcome
 
-Issue #2 implementation and reviews are complete and merged. Issue #3 implementation, reviews, and acceptance verification are complete; commit/PR/merge is pending.
+Issue #2 implementation and reviews are complete and merged. Issue #3 implementation, reviews, and acceptance verification are complete and merged in PR #12 at `0efe838`.
+
+## Issue #4 Handoff
+
+- Issue #3 was merged in PR #12 at `0efe838`; issue #4 is active and review pending.
+- Issue #4 adds a supervised single-instance timeout sweep with a default 30-second
+  `FLOOR_TIMEOUT_SECONDS` configuration, persisted `acquired_at` authority, locked
+  stale-row verification, `timed_out` audit events, and restart recovery.
+
+## Issue #4 Review Findings
+
+- Resolved automatic-process coverage by arming the supervised mailbox timer only
+  after SQL Sandbox ownership is established; tests cover automatic expiry, audit,
+  re-obtain, fresh-owner preservation, and supervised child restart recovery.
+- Resolved the timeout query N+1 finding by treating the bounded `FOR UPDATE SKIP
+  LOCKED` batch as authoritative inside its transaction; the lock prevents obtain
+  or release from replacing a candidate before its audit/delete commit.
+- Replaced the ownership index with a concurrent `(acquired_at, id)` index and
+  explicit forward/rollback migration functions with DDL and migration locks
+  disabled as required by PostgreSQL concurrent index creation.
+- Bounded timeout parsing against the supported `DateTime` range and changed sweep
+  cadence to half the configured timeout, capped at 60 seconds; this avoids fixed
+  one-second polling for large configurations.
+- Narrowed failure handling to expected database exceptions. Unexpected failures
+  remain supervisor-visible; no broad system-exit catch is used.
+- Atomicity remains guaranteed by the single transaction enclosing locked selection,
+  audit insertion, and ownership deletion; integration tests assert both outcomes.
+- Status: findings resolved; pending re-review.
+
+## Issue #4 Performance Follow-up
+
+- Resolved the expired-backlog finding by returning whether the bounded expiration
+  batch was full. A full batch schedules a 1ms mailbox follow-up; empty or partial
+  batches return to normal cadence, and database errors use normal retry cadence.
+- Added a deterministic 205-row automatic backlog test proving all rows and exact
+  `timed_out` audits drain promptly from one activation without a 15-second wait.
+- Status: performance follow-up implemented; pending re-review.
+
+## Issue #4 Final General Review Follow-up
+
+- Added a tracked timer token/reference to `FloorTimeout`; initialization arms one
+  chain, repeated `arm/1` calls are idempotent, current sweep messages clear their
+  reference before scheduling exactly one successor, and stale tokens are ignored.
+- Added repeated-arm coverage and backlog timing assertions showing the two
+  immediate full-batch follow-ups occur well before the configured 2-second normal
+  cadence and before three normal intervals.
+- General and security reviews approve; performance review approves after backlog
+  follow-up; acceptance is ACCEPT with 40 tests. Issue #4 is ready for merge.

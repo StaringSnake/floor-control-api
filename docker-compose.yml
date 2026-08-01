@@ -23,6 +23,7 @@ services:
       PHX_HOST: ${PHX_HOST:-localhost}
       PORT: ${PORT:-4000}
       POOL_SIZE: ${POOL_SIZE:-10}
+      FLOOR_TIMEOUT_SECONDS: ${FLOOR_TIMEOUT_SECONDS:-30}
       DATABASE_SSL: ${DATABASE_SSL:-false}
     ports:
       - "${PORT:-4000}:4000"

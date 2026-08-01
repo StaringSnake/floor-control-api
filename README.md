@@ -19,6 +19,13 @@ The API is available at <http://localhost:4000/>. PostgreSQL is persisted in the
 `postgres_data` Compose volume. Stop the stack with `docker compose down`; add
 `-v` when intentionally removing the local database.
 
+Occupied floors are automatically released after `FLOOR_TIMEOUT_SECONDS` (default
+30 seconds). Timeout recovery is supervised and uses persisted ownership rows, so
+it also recovers expired ownerships after a restart. This deployment currently
+supports one application instance only; there is no cross-instance coordinator.
+The bounded background sweep runs at half the timeout, capped at 60 seconds, so
+automatic release may occur within that sweep granularity after the timeout.
+
 `/` is a liveness check and `/ready` is a database-aware readiness check. The
 container health check uses `/ready`, so a running API with an unavailable
 database is reported unhealthy even though its liveness endpoint remains up.

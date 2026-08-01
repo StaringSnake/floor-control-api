@@ -13,4 +13,6 @@ config :floor_control, FloorControlWeb.Endpoint,
   server: false,
   secret_key_base: "test-only-secret-key-base-for-floor-control-api"
 
+config :floor_control, :floor_timeout_schedule, false
+
 config :logger, level: :warning
