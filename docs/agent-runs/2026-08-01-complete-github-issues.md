@@ -1,6 +1,6 @@
-# Run: Issues #2 and #3 floor control
+# Run: Complete Floor Control API epic (#9)
 
-Status: pending merge; issue #2 merged, issue #3 approved and acceptance-verified
+Status: completed
 Started: 2026-08-01
 
 ## Objective
@@ -305,3 +305,30 @@ Issue #2 implementation and reviews are complete and merged. Issue #3 implementa
   without executing command substitution. A disposable non-default-port
   Compose project reached healthy status and returned `{"status":"ok"}` from
   `/ready`; all resources were removed afterward.
+
+## Conductor Final Reconciliation
+
+- PR #18 (`https://github.com/StaringSnake/floor-control-api/pull/18`) merged to
+  `main` at `c5a886a17fb43e2d62d5e8913acbbbe876cbe034`.
+- The merge-commit push CI run completed successfully:
+  `https://github.com/StaringSnake/floor-control-api/actions/runs/30700430135`
+  (`verify` job:
+  `https://github.com/StaringSnake/floor-control-api/actions/runs/30700430135/job/91370377545`).
+  It ran format/compile/test, production image build, and OpenAPI validation.
+  CI is triggered by `push` to `main` and all pull requests; no separate
+  merge-commit run is being inferred—the exact merge-commit push run is
+  recorded above.
+- Issues #1 through #8 are closed. Their implementation chain is PRs #10–#18
+  (with PR #16 recording the issue #6 journal finalization); issue #8 acceptance
+  is `ACCEPT` with 67 tests, valid format/compile/migrations/OpenAPI, production
+  image, and clean disposable Compose startup/health evidence.
+- Reviewer selections: general correctness, security, performance, contract,
+  and acceptance were selected where applicable. Security was skipped for the
+  read-only current-holder lookup (#5); preemption was correctly deferred to
+  #6 during the earlier obtain/release review. No review blockers remain.
+- Definition of done for #9 is reconciled: all child issues/tests/OpenAPI/
+  Docker/CI evidence are green. This journal is the single final run record;
+  no duplicate journal was created.
+- Next: update #9's child checklist and closure comment after this journal PR
+  merges, then close #9. No application, configuration, or API contract work
+  remains in this tracking epic.
