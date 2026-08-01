@@ -260,3 +260,48 @@ Issue #2 implementation and reviews are complete and merged. Issue #3 implementa
   ID. The test percent-encodes the path, paginates across two events, verifies
   the token remains under the documented 2,048-byte limit, and confirms the
   continuation returns exactly the remaining event.
+
+## Issue #8 Documentation And Contract Verification
+
+- Issue #7 merged in PR #17 at `a660607`; its finalized journal status is
+  recorded above. Issue #8 is active, with documentation, contract, and
+  operational evidence/review pending.
+- Audited README commands against the Mix aliases, development/test runtime
+  configuration, Dockerfile, Compose file, entrypoint, CI workflow, router,
+  controllers, and OpenAPI specification.
+- Added native prerequisites/setup, server, migration, test, format, compile,
+  container migration, and environment-variable instructions without changing
+  feature behavior or the approved API contract.
+- Corrected a verified Compose defect: overriding `PORT` previously changed the
+  application listener while the container mapping and health check remained on
+  port 4000. The mapping and health check now use the configured port.
+- Initial verification passed for `mix format --check-formatted`,
+  `mix compile --warnings-as-errors`, `MIX_ENV=test mix ecto.setup`, and
+  `MIX_ENV=test mix test` (67 tests). The pinned OpenAPI lint completed with
+  four warnings: two nullable-example warnings and two 4XX-rule warnings; it
+  reported the document valid. The entrypoint is executable, the production image builds, Compose
+  config renders with supplied verification variables, and an isolated Compose
+  project passed `/ready` and `/` curls before cleanup of its volume/network.
+- Review follow-up: README now distinguishes the declared Elixir `~> 1.14`
+  requirement from the Elixir 1.16/Erlang 26 CI evidence, and accurately states
+  that `mix setup` runs `deps.get` only while `mix ecto.setup` creates and
+  migrates the database.
+- Review follow-up: the standalone image health check now reads runtime `PORT`
+  with a 4000 default, matching Compose behavior. The OpenAPI `Holder` and
+  `Counterparty` component schemas are nullable and referenced directly, so
+  null examples retain the runtime contract and validate without warnings.
+- Final OpenAPI lint has two intentional `operation-4xx-response` warnings for
+  liveness and readiness. The earlier nullable-example warnings are resolved;
+  these operations expose no meaningful client-error response and no artificial
+  status was added.
+- Current status: issue #8 corrections and clean operational evidence are
+  complete; final review/acceptance remains pending.
+- General and security reviews approve. Acceptance is ACCEPT based on the
+  combined independent/trusted evidence, including 67 passing tests; issue #8
+  is pending merge publication.
+- Final follow-up verified Compose preserves the escaped runtime health-check
+  variables (`$${PORT:-4000}` and `$${port}`) while rendering the configured
+  port mapping. A malformed shell-expression `PORT` was rejected by Compose
+  without executing command substitution. A disposable non-default-port
+  Compose project reached healthy status and returned `{"status":"ok"}` from
+  `/ready`; all resources were removed afterward.

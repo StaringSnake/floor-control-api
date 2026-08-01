@@ -307,12 +307,10 @@ components:
       required: [holder]
       properties:
         holder:
-          type: object
-          nullable: true
-          allOf:
-            - $ref: '#/components/schemas/Holder'
+          $ref: '#/components/schemas/Holder'
     Holder:
       type: object
+      nullable: true
       required: [userId, priority, acquiredAt]
       properties:
         userId:
@@ -377,10 +375,7 @@ components:
           minimum: 1
           maximum: 10
         counterparty:
-          type: object
-          nullable: true
-          allOf:
-            - $ref: '#/components/schemas/Counterparty'
+          $ref: '#/components/schemas/Counterparty'
         occurredAt:
           type: string
           format: date-time
@@ -391,6 +386,7 @@ components:
           description: Inserted timestamp, as an ISO 8601 UTC date-time with microsecond precision.
     Counterparty:
       type: object
+      nullable: true
       required: [userId, priority]
       properties:
         userId:

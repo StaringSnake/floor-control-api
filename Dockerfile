@@ -40,6 +40,6 @@ USER app
 
 EXPOSE 4000
 HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=5 \
-  CMD curl --fail --silent http://127.0.0.1:4000/ready || exit 1
+  CMD ["sh", "-c", "port=\"${PORT:-4000}\"; curl --fail --silent \"http://127.0.0.1:${port}/ready\" || exit 1"]
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
