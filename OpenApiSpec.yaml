@@ -377,6 +377,7 @@ components:
           minimum: 1
           maximum: 10
         counterparty:
+          type: object
           nullable: true
           allOf:
             - $ref: '#/components/schemas/Counterparty'
