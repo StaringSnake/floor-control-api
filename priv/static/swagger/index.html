@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Floor Control API - Swagger UI</title>
+    <link rel="stylesheet" href="/swagger/swagger-ui-5.11.10.css" />
+  </head>
+  <body>
+    <div id="swagger-ui"></div>
+    <script src="/swagger/swagger-ui-5.11.10-bundle.js"></script>
+    <script src="/swagger/swagger-ui-5.11.10-standalone-preset.js"></script>
+    <script>
+      window.onload = function () {
+        window.ui = SwaggerUIBundle({
+          url: "/openapi.yaml",
+          validatorUrl: null,
+          dom_id: "#swagger-ui",
+          deepLinking: true,
+          presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
+          layout: "StandaloneLayout",
+          tryItOutEnabled: true
+        });
+      };
+    </script>
+  </body>
+</html>
