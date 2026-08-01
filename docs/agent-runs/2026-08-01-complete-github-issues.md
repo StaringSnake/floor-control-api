@@ -184,3 +184,79 @@ Issue #2 implementation and reviews are complete and merged. Issue #3 implementa
   schema rollback removes the constraint and columns.
 - General, security, and performance reviews approved after reassessment; acceptance
   is ACCEPT with 56 tests. Issue #6 is complete.
+
+## Issue #7 Audit History
+
+- Issue #6 prerequisite is merged in PR #15 at `0f0ee90`; its finalized journal
+  status is recorded by PR #16 at `078c969`. The existing provenance migrations
+  and deterministic audit index were verified; no migration was required.
+- Added `GET /groups/{groupId}/floor/history` with oldest-first keyset
+  pagination, default page size 50, maximum page size 100, and opaque URL-safe
+  `pageToken` values encoding the `(occurred_at, id)` continuation key and a
+  global audit-ID snapshot high-water mark.
+- The response exposes `eventId`, `groupId`, `userId`, `transition`, `priority`,
+  nullable `counterparty`, `occurredAt`, and inserted `recordedAt`. Invalid
+  page sizes and tokens return the established `400` error shape; empty history
+  returns an empty events list and a null token.
+- SQL applies the group filter, snapshot high-water and row-value keyset
+  predicates, deterministic order, and a `pageSize + 1` limit before loading
+  rows. Stable append-only rows cannot be duplicated or skipped between pages;
+  concurrent appends are excluded from the current walk and visible to a new
+  walk.
+- User decision: `nextPageToken` is the required response field name, not
+  `nextCursor`. Issue #7 is pending merge.
+
+### Issue #7 Review Disposition
+
+- Added a 2,048-byte token bound, exact four-key validation including the
+  normalized group ID, PostgreSQL bigint
+  bounds for both token IDs, and validation that the last event ID does not
+  exceed the snapshot high-water ID.
+- Added a global audit-ID high-water mark to each token. Every page constrains
+  `event.id <= highWaterEventId`, so appends—including rows with deliberately
+  earlier `occurred_at` values—are excluded from the current walk and visible
+  to a new walk. The token is intentionally unsigned: it is opaque position
+  state, not tamper protection; group scoping prevents cross-group data access.
+- Replaced the keyset predicate with a parameterized PostgreSQL row-value
+  comparison `(occurred_at, id) > (token_occurred_at, token_id)` while retaining
+  the group, high-water, order, and bounded-limit predicates.
+- Corrected the OpenAPI `pageSize` schema to integer with minimum 1, maximum
+  100, and default 50; runtime query parsing continues to accept HTTP query
+  strings and validate them strictly.
+- The earlier performance concern about a `NOT VALID` constraint was dismissed:
+  migration `20260801000201_validate_preemption_provenance.exs` validates the
+  constraint, and the full migrated test suite passes. No migration was needed.
+- Focused review tests cover stable snapshot behavior, earlier concurrent
+  appends, exact token keys, oversized tokens, bigint bounds, high-water/id
+  relationships, tie-breaking, page boundaries, defaults, maximums, isolation,
+  and invalid pagination. General, security, performance, and contract reviews
+  approve; acceptance is ACCEPT with 67 tests. Issue #7 is pending merge.
+- Final review confirmed `nextPageToken` is encoded only from `List.last/1` of
+  the split returned page; the `pageSize + 1` sentinel is never encoded. A 205
+  event integration test walks pages of 100, 100, and 5 and asserts every event
+  ID appears exactly once and in order.
+- Documented the 2,048-byte `pageToken` maximum in OpenAPI. This accommodates
+  normalized identifiers up to 255 UTF-8 characters after JSON and URL-safe
+  Base64 encoding; oversized tokens are rejected with `400` before Base64
+  decoding.
+- Bound each token to its normalized `groupId`. A token issued for one group is
+  rejected with the same generic `pageToken is invalid` response when supplied
+  to another group, before any history query runs. Maximum-length group
+  pagination is covered end to end.
+- Covering-index review disposition: no INCLUDE index or migration was added.
+  The endpoint returns the full audit payload, so heap access is expected; the
+  existing `(group_id, occurred_at, id)` navigation index is sufficient for the
+  bounded 101-row keyset query. On a transactionally rolled-back 100,000-row
+  representative seed, after `ANALYZE`, `EXPLAIN (ANALYZE, BUFFERS)` showed an
+  `Index Scan` with the composite row-value range, `LIMIT 101`, and six shared
+  buffer hits; no index-only claim is made.
+- The backdated-append test intentionally performs page 1, inserts an event,
+  requests page 2, then starts a fresh walk. This is the relevant sequential
+  pagination interleaving; overlapping HTTP requests are not required.
+- Security review was previously blocked by missing diff visibility, not by a
+  finding. The exact token decoder and parameterized row-value query are now
+  included in the review handoff.
+- Added security-boundary coverage for a 255-character multibyte Unicode group
+  ID. The test percent-encodes the path, paginates across two events, verifies
+  the token remains under the documented 2,048-byte limit, and confirms the
+  continuation returns exactly the remaining event.

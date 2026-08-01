@@ -220,6 +220,86 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /groups/{groupId}/floor/history:
+    get:
+      summary: List floor audit history
+      description: >
+        Returns append-only audit events for the group in deterministic
+        chronological order (occurredAt ascending, then eventId ascending).
+        pageSize defaults to 50 and must be an integer from 1 through 100.
+        pageToken is an opaque URL-safe token returned by a previous response;
+        it is scoped to this group by the query. New events appended while
+        paging are excluded from the current walk by a snapshot high-water
+        event ID. This guarantees stable history without duplicates or gaps;
+        events appended after the first page are visible to a new walk, not
+        the current walk. The token is opaque.
+      operationId: floorHistory
+      tags: [Floor Control]
+      parameters:
+        - name: groupId
+          in: path
+          required: true
+          description: The trimmed, non-empty ID of the group.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 255
+          example: group-alpha-123
+        - name: pageSize
+          in: query
+          required: false
+          description: Number of events to return. Defaults to 50; maximum 100.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+          example: 25
+        - name: pageToken
+          in: query
+          required: false
+          description: Opaque URL-safe continuation token from a previous response.
+          schema:
+            type: string
+            maxLength: 2048
+          example: eyJvY2N1cnJlZEF0IjoiMjAyNi0wOC0wMVQxMjowMDowMC4wMDAwMDFaIiwiaWQiOjUwLCJoaWdoV2F0ZXJFdmVudElkIjoxMDAsImdyb3VwSWQiOiJncm91cC1hbHBoYS0xMjMifQ
+      responses:
+        '200':
+          description: A bounded page of audit history, oldest first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FloorHistoryResponse'
+              example:
+                events:
+                  - eventId: 1
+                    groupId: group-alpha-123
+                    userId: user-456
+                    transition: acquired
+                    priority: 7
+                    counterparty: null
+                    occurredAt: '2026-08-01T12:00:00.000001Z'
+                    recordedAt: '2026-08-01T12:00:00.000002Z'
+                nextPageToken: null
+        '400':
+          description: Missing, blank, or invalid groupId, pageSize, or pageToken.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalidPageSize:
+                  value:
+                    message: pageSize must be an integer between 1 and 100
+                invalidPageToken:
+                  value:
+                    message: pageToken is invalid
+        '404':
+          description: The path is not found, including an omitted groupId path segment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 components:
   schemas:
     CurrentHolderResponse:
@@ -265,6 +345,59 @@ components:
       properties:
         message:
           type: string
+    FloorHistoryResponse:
+      type: object
+      required: [events, nextPageToken]
+      properties:
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/FloorHistoryEvent'
+        nextPageToken:
+          type: string
+          nullable: true
+          description: Opaque continuation token, or null when there are no more events.
+    FloorHistoryEvent:
+      type: object
+      required:
+        [eventId, groupId, userId, transition, priority, counterparty, occurredAt, recordedAt]
+      properties:
+        eventId:
+          type: integer
+          format: int64
+        groupId:
+          type: string
+        userId:
+          type: string
+        transition:
+          type: string
+          enum: [acquired, released, timed_out, preempted]
+        priority:
+          type: integer
+          minimum: 1
+          maximum: 10
+        counterparty:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/Counterparty'
+        occurredAt:
+          type: string
+          format: date-time
+          description: ISO 8601 UTC date-time with microsecond precision.
+        recordedAt:
+          type: string
+          format: date-time
+          description: Inserted timestamp, as an ISO 8601 UTC date-time with microsecond precision.
+    Counterparty:
+      type: object
+      required: [userId, priority]
+      properties:
+        userId:
+          type: string
+        priority:
+          type: integer
+          minimum: 1
+          maximum: 10
     ErrorResponse:
       type: object
       required: [message]
