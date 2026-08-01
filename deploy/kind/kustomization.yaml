@@ -1,0 +1,7 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Intentionally foundation-only. Applying this path must never start the API
+# or execute migrations; issue #21 owns the lifecycle orchestration.
+resources:
+  - foundation

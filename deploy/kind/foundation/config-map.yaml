@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: floor-control-config
+  namespace: floor-control
+data:
+  POSTGRES_DB: floor_control
+  POSTGRES_USER: floor_control
+  POSTGRES_HOST: postgres
+  DATABASE_SSL: "false"
+  PHX_HOST: localhost
+  PORT: "4000"
+  POOL_SIZE: "5"
+  FLOOR_TIMEOUT_SECONDS: "30"
+  # Local Kind resource bound; do not copy this scheduler limit to production.
+  ERL_AFLAGS: "+S 2:2 +SDcpu 1 +SDio 1"
