@@ -130,3 +130,26 @@ Issue #2 implementation and reviews are complete and merged. Issue #3 implementa
   cadence and before three normal intervals.
 - General and security reviews approve; performance review approves after backlog
   follow-up; acceptance is ACCEPT with 40 tests. Issue #4 is ready for merge.
+
+## Issue #5 Handoff
+
+- Issue #4 merged in PR #13 at `5a4d7b2`; issue #5 adds current-holder lookup and
+  is pending review.
+- `GET /groups/{groupId}/floor` always returns `200` for a valid groupId with
+  either a nullable `holder` or `{userId, priority, acquiredAt}`. Invalid
+  identifiers remain `400`, and omitted path segments remain router `404`.
+- Lookup performs one indexed current-ownership read and has no audit or other
+  side effects. Release and timeout leave subsequent lookup responses empty.
+- The date contract is an ISO 8601 UTC `date-time` with microsecond precision.
+
+## Issue #5 Review Disposition
+
+- Corrected `CurrentHolderResponse.holder` to use OpenAPI 3.0-compatible
+  `nullable: true` with `allOf` around the `Holder` reference; nullable is no
+  longer a sibling of `$ref`.
+- The documented `holder: null` example remains the unoccupied response, and
+  the existing API test verifies that exact runtime JSON shape.
+- General and performance reviews approve. Security review was skipped because
+  this is a read-only public lookup with no new authorization boundary, and
+  holder exposure is part of the user-approved contract.
+- Acceptance is ACCEPT with 49 tests. Issue #5 is pending merge.

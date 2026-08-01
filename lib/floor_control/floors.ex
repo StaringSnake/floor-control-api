@@ -47,6 +47,15 @@ defmodule FloorControl.Floors do
     end
   end
 
+  @spec current_holder(term()) ::
+          {:ok, FloorOwnership.t() | nil}
+          | {:error, {:validation, String.t()}}
+  def current_holder(group_id) do
+    with {:ok, group_id} <- normalize_identifier(group_id, "groupId") do
+      {:ok, Repo.get_by(FloorOwnership, group_id: group_id)}
+    end
+  end
+
   @doc "Releases expired ownerships and reports whether the bounded batch was full."
   @spec expire_expired(DateTime.t(), pos_integer()) ::
           {:ok, non_neg_integer(), boolean()}
