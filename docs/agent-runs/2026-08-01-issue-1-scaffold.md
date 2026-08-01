@@ -40,9 +40,9 @@ Complete the approved Issue #1 scaffold for the Floor Control API, including the
 ## Risks And Blockers
 
 - GitHub Actions remains unexecuted locally.
-- Changes are uncommitted and Issue #1 remains open.
+- Implementation commit `0285f05` is included in open PR #10; Issue #1 is linked for closure when the PR merges.
 - No implementation blocker remains.
 
 ## Outcome
 
-Issue #1 scaffold implementation is complete, accepted, and verified locally within the stated scope; the changes are prepared for commit and pull request creation.
+Issue #1 scaffold implementation is complete, accepted, and verified locally within the stated scope. Implementation commit `0285f05` is included in PR #10: https://github.com/StaringSnake/floor-control-api/pull/10. GitHub Actions CI is pending/in progress.
