@@ -225,6 +225,7 @@ components:
       required: [holder]
       properties:
         holder:
+          type: object
           nullable: true
           allOf:
             - $ref: '#/components/schemas/Holder'

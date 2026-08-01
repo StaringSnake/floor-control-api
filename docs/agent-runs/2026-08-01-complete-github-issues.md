@@ -153,3 +153,5 @@ Issue #2 implementation and reviews are complete and merged. Issue #3 implementa
   this is a read-only public lookup with no new authorization boundary, and
   holder exposure is part of the user-approved contract.
 - Acceptance is ACCEPT with 49 tests. Issue #5 is pending merge.
+- CI OpenAPI lint required an explicit `type: object` alongside `nullable: true`;
+  that contract-only correction is applied before merge.
