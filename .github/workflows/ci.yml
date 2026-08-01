@@ -40,7 +40,7 @@ jobs:
           -v "$GITHUB_WORKSPACE:/workspace"
           -w /workspace
           hexpm/elixir:1.16.3-erlang-26.2.5.21-debian-bookworm-20260713-slim@sha256:b63e3236fbf5c806b4143367cd29748556a09268bf62f7d498ce14019a978cad
-          sh -c 'mix local.hex 2.5.1 --force && mix local.rebar rebar3 https://github.com/erlang/rebar3/releases/download/3.25.1/rebar3 --sha512 69073f6ad163f74971545015238614c327893960c1b3f26df5377df135c773a0716b48b65c2a48cef878f185dd92805abc69894adfa3fd27a90c62a64ba371e2 --force && mix deps.get --locked && mix format --check-formatted && mix compile --warnings-as-errors && mix test'
+          sh -c 'mix local.hex 2.5.1 --force && mix local.rebar rebar3 https://github.com/erlang/rebar3/releases/download/3.25.1/rebar3 --sha512 69073f6ad163f74971545015238614c327893960c1b3f26df5377df135c773a0716b48b65c2a48cef878f185dd92805abc69894adfa3fd27a90c62a64ba371e2 --force && mix deps.get --locked && mix format --check-formatted && mix compile --warnings-as-errors && MIX_ENV=test mix ecto.setup && mix test'
 
       - name: Build production image
         run: docker build --tag floor-control-api:ci .
