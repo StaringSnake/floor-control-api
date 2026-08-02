@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+kubewatch() { kubectl --kubeconfig "$kubeconfig" "$@"; }
+postgres_kube() { kubectl --kubeconfig "$kubeconfig" --request-timeout=5s "$@"; }
+
 terminate_process_tree() {
   local root_pid="$1" pid children
   local -a tree_pids=()
@@ -34,6 +37,30 @@ terminate_process_tree() {
   wait "$root_pid" 2>/dev/null || true
 }
 
+run_with_timeout() {
+  local timeout_seconds="$1" pid ticks status process_state
+  shift
+  [[ "$timeout_seconds" =~ ^[1-9][0-9]*$ ]] || return 2
+
+  "$@" &
+  pid="$!"
+  for ((ticks = 0; ticks < timeout_seconds * 10; ticks++)); do
+    process_state="$(ps -o stat= -p "$pid" 2>/dev/null || true)"
+    if ! kill -0 "$pid" 2>/dev/null || [[ "$process_state" == Z* ]]; then
+      if wait "$pid"; then
+        return 0
+      else
+        status="$?"
+        return "$status"
+      fi
+    fi
+    sleep 0.1
+  done
+
+  terminate_process_tree "$pid"
+  return 124
+}
+
 wait_for_api_marker() {
   local base_url="$1" marker="$2" attempts="$3" delay_seconds="$4" attempt
   for ((attempt = 1; attempt <= attempts; attempt++)); do
@@ -44,6 +71,43 @@ wait_for_api_marker() {
     (( attempt == attempts )) || sleep "$delay_seconds"
   done
   return 1
+}
+
+create_postgres_persistence_marker() {
+  local marker="$1" table_name sql sql_marker
+  [[ "$marker" =~ ^kind-acceptance-[0-9]+$ ]] || return 2
+  table_name="kind_acceptance_${marker#kind-acceptance-}"
+  local marker_value="postgres-persistence-$marker"
+  sql_marker="${marker_value//\'/\'\'}"
+  sql="BEGIN; CREATE TABLE \"$table_name\" (marker text NOT NULL); INSERT INTO \"$table_name\" (marker) VALUES ('$sql_marker'); COMMIT;"
+  run_with_timeout 15 postgres_exec_sql "$sql" >/dev/null
+  postgres_marker_table="$table_name"
+  postgres_marker_value="$marker_value"
+  postgres_marker_created=1
+}
+
+check_postgres_persistence_marker() {
+  local output
+  [[ -n "${postgres_marker_table:-}" && -n "${postgres_marker_value:-}" ]] || return 2
+  output="$(run_with_timeout 15 postgres_exec_sql "SELECT marker FROM \"$postgres_marker_table\";")"
+  [[ "$output" == "$postgres_marker_value" ]]
+}
+
+cleanup_postgres_persistence_marker() {
+  if [[ "${postgres_marker_created:-0}" == 1 && -n "${postgres_marker_table:-}" ]]; then
+    run_with_timeout 15 postgres_exec_sql "DROP TABLE IF EXISTS \"$postgres_marker_table\";" \
+      >/dev/null 2>&1 || true
+  fi
+  postgres_marker_table=""
+  postgres_marker_value=""
+  postgres_marker_created=0
+}
+
+postgres_exec_sql() {
+  local sql="$1"
+  postgres_kube -n "$NAMESPACE" exec postgres-0 -c postgres -- \
+    sh -ec 'PGCONNECT_TIMEOUT=5 PGOPTIONS="-c statement_timeout=10000 -c lock_timeout=5000" PGPASSWORD="$POSTGRES_PASSWORD" psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --tuples-only --no-align --set=ON_ERROR_STOP=1 --command="$1"' \
+    -- "$sql"
 }
 
 validate_cluster_ownership() {

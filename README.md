@@ -27,7 +27,8 @@ Stop the stack with `docker compose down`; add
 ### Local Kind deployment
 
 This is a disposable, local-only demo deployment. It requires Docker with at
-least 4 GB allocated memory, Kind, kubectl, OpenSSL, curl, git, and `pgrep`.
+least 4 GB allocated memory, Kind, kubectl, OpenSSL, curl, git, `pgrep`, and
+`ps`. The verifier uses `ps` to detect and reap completed timeout processes.
 Run the lifecycle scripts from the repository root. The create script requires
 the image and Kind manifest inputs to be committed, then builds the current
 `HEAD`, loads the immutable `floor-control-api:kind-<git-sha>` image into Kind,
