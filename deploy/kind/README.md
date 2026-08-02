@@ -1,14 +1,14 @@
 # Local Kind manifests
 
 These manifests target one disposable, one-node Kind cluster. They deliberately
-do not contain a Secret. The direct lifecycle below creates credentials once,
-reuses them on reruns, and never places credential values in command arguments,
-shell history, or output. Issue #21 should automate the same policy.
+do not contain a Secret. The supported lifecycle scripts create credentials
+once, reuse them on reruns, and never place credential values in command
+arguments, shell history, or output.
 
-The API image is the mutable local placeholder tag `floor-control-api:kind-local`.
-It is not a registry digest. Issue #21 must render a temporary copy using one
-immutable `kind-<git-sha>` tag, load that exact tag into Kind, and use the same
-rendered tag for the migration Job and API Deployment.
+The manifests use the mutable local placeholder tag `floor-control-api:kind-local`
+for direct inspection. The supported create script renders one immutable
+`kind-<git-sha>` tag, loads that exact tag into Kind, and uses it for both the
+migration Job and API Deployment.
 
 ## Automated lifecycle (issue #21)
 
@@ -20,22 +20,29 @@ scripts/verify-kind-deployment.sh
 scripts/delete-kindly.sh
 ```
 
-The create script requires Docker, Kind, kubectl, openssl, curl, and git. It
-builds and loads one immutable `floor-control-api:kind-<committed-sha>` image,
+The create script requires Docker, Kind, kubectl, openssl, curl, git, and pgrep.
+It builds and loads one immutable `floor-control-api:kind-<committed-sha>` image,
 maps the NodePort to `127.0.0.1`, waits for PostgreSQL and migrations, and
 prints loopback API/Swagger/OpenAPI URLs. `KIND_CLUSTER`, `KIND_NAMESPACE`,
 `KIND_HOST_PORT`, `KIND_NODE_PORT`, and `KIND_NODE_IMAGE` are overridable.
 The node-image override must remain digest-pinned (`name@sha256:<64 hex>`).
-Untracked files and documentation changes are allowed; tracked image or Kind
-manifest changes must be committed before an image deployment. Reruns retain
-the Secret, PVC, and PostgreSQL data. Deletion is intentional and removes the
-named cluster and its local data only after verifying the automation ownership
-marker in `kube-system`; a same-name unowned cluster is refused.
+Unrelated untracked files and documentation changes are allowed. Any tracked or
+untracked file under the image-build inputs (`Dockerfile`, `.dockerignore`,
+`docker-entrypoint.sh`, `mix.exs`, `mix.lock`, `.formatter.exs`, `config/`,
+`lib/`, `priv/`) or the YAML inputs under `deploy/kind/` (including its
+`foundation/`, `migration/`, and `application/` manifests) makes the deployment
+stop until that input is committed or removed. Documentation-only files under
+`deploy/kind/` do not trigger this guard. Reruns retain the Secret, PVC, and
+PostgreSQL data. Deletion is intentional and removes the named cluster and its
+local data only after verifying the automation ownership marker in
+`kube-system`; a same-name unowned cluster is refused.
 
 The default API port is `4000`; if Compose is running, use a free alternate
 port such as `KIND_HOST_PORT=4001`. The script preserves the user's kubeconfig
-context by using a protected temporary kubeconfig and prints an explicit
-`kind export kubeconfig` command for later inspection.
+context by using a protected temporary kubeconfig. For later inspection, use
+`kind get kubeconfig` redirected to a mode-600 file in a mode-700 temporary
+directory and pass it explicitly via `kubectl --kubeconfig`; remove that
+directory when finished. Do not use the ambient kubectl context.
 Deletion uses its own protected temporary kubeconfig and removes its temporary
 log directory on normal exit, timeout, or interruption.
 
@@ -45,107 +52,38 @@ pre-automation Secret is rejected rather than silently adopted. A custom
 namespace is also rejected if the cluster-global `postgres-data` PV is already
 claimed by another namespace.
 
-## First-run credentials and foundation
+## Credentials and foundation
 
-Namespace creation must precede Secret creation. On a fresh cluster, generate
-the Secret once with protected temporary files, then apply the foundation. On a
-rerun, an existing Secret is reused and no new credentials are generated.
-
-```sh
-set -eu
-
-kubectl get namespace floor-control >/dev/null 2>&1 || \
-  kubectl create namespace floor-control >/dev/null
-
-secret_dir="$(mktemp -d "${TMPDIR:-/tmp}/floor-control-secret.XXXXXX")"
-chmod 700 "$secret_dir"
-trap 'rm -rf "$secret_dir"' EXIT
-
-if kubectl -n floor-control get secret floor-control-secrets >/dev/null 2>&1; then
-  printf '%s\n' 'Reusing existing floor-control-secrets'
-else
-  openssl rand -hex 32 >"$secret_dir/POSTGRES_PASSWORD"
-  openssl rand -hex 64 >"$secret_dir/SECRET_KEY_BASE"
-  chmod 600 "$secret_dir"/*
-  password="$(<"$secret_dir/POSTGRES_PASSWORD")"
-  printf 'ecto://floor_control:%s@postgres:5432/floor_control' "$password" \
-    >"$secret_dir/DATABASE_URL"
-  chmod 600 "$secret_dir/DATABASE_URL"
-
-  kubectl -n floor-control create secret generic floor-control-secrets \
-    --from-file=POSTGRES_PASSWORD="$secret_dir/POSTGRES_PASSWORD" \
-    --from-file=SECRET_KEY_BASE="$secret_dir/SECRET_KEY_BASE" \
-    --from-file=DATABASE_URL="$secret_dir/DATABASE_URL" >/dev/null
-fi
-
-kubectl apply -k deploy/kind
-kubectl -n floor-control wait --for=condition=ready pod/postgres-0 --timeout=180s
-```
-
-The temporary directory is mode `700`, files are mode `600`, and only file
-paths—not credential values—are passed to `kubectl`. The trap removes the files
-on exit. Do not rotate this Secret during a normal rerun: changing the password
-requires a coordinated PostgreSQL `ALTER ROLE` operation, or intentional data
-reset, and is outside the normal local deployment lifecycle.
+Do not apply the foundation or create the Secret manually with an ambient
+kubectl context. Use `scripts/create-and-deploy-in-kind.sh`: it creates the
+namespace first, generates the Secret through protected temporary files, adds
+the required ownership labels, fails closed on lookup or adoption errors, and
+reuses only a complete managed Secret. Credential values are never printed.
+This keeps Secret and foundation ordering aligned with the supported lifecycle;
+changing the password requires a coordinated PostgreSQL operation.
 
 ## Migration and API lifecycle
 
-The root kustomization is foundation-only and must never start the API or run
-migrations. The migration Job explicitly invokes `FloorControl.Release.migrate/0`;
-the API explicitly invokes `start`, bypassing the image entrypoint migration.
+Use `scripts/create-and-deploy-in-kind.sh` for the foundation, migration Job,
+and API Deployment in the required order. It waits for PostgreSQL and
+migrations, applies the API only after migration completion, and waits for API
+readiness. Do not run the kustomizations manually; the script's protected
+temporary kubeconfig and immutable image rendering are part of the supported
+lifecycle.
 
-```sh
-set -eu
-
-if kubectl -n floor-control get job floor-control-migrate >/dev/null 2>&1; then
-  if kubectl -n floor-control wait --for=condition=complete \
-    job/floor-control-migrate --timeout=300s; then
-    :
-  else
-    failed_status="$(kubectl -n floor-control get job floor-control-migrate \
-      -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}')"
-    if [ "$failed_status" = True ]; then
-      printf '%s\n' 'Existing migration Job is terminal Failed; replacing it' >&2
-    else
-      printf '%s\n' \
-        'Existing migration Job is active, unknown, or timed out; refusing to delete it' >&2
-      exit 1
-    fi
-  fi
-
-  # The automation retains a completed Job for the same immutable image. A
-  # failed Job or a completed Job for an older image is replaced.
-  kubectl -n floor-control delete job floor-control-migrate \
-    --ignore-not-found --wait=true
-fi
-
-kubectl apply -k deploy/kind/migration
-kubectl -n floor-control wait --for=condition=complete \
-  job/floor-control-migrate --timeout=300s
-
-kubectl apply -k deploy/kind/application
-kubectl -n floor-control rollout status deployment/floor-control-api --timeout=180s
-```
-
-Job pod templates are immutable. Every new deployment waits for an existing
-active Job to complete successfully. After a wait failure, only a Job with a
-terminal Failed condition is deleted; active, unknown, and timed-out Jobs are
-left in place and stop the lifecycle. A completed Job for the same immutable
-image is retained on an idempotent rerun. Terminal-failed Jobs and completed
-Jobs for an older image are recreated before applying the current migration
-kustomization. Ecto skips migration versions already recorded in the database,
-and a new immutable image triggers the pending-migration Job.
+Job pod templates are immutable. Every rerun waits for an existing active Job
+to complete successfully. After a wait failure, only a terminal Failed Job is
+replaced; active, unknown, and timed-out Jobs are left in place and stop the
+lifecycle. A completed Job for the same immutable image is retained. Ecto skips
+migrations already recorded in the database.
 
 ## Access and persistence
 
-The API Service remains a NodePort on `30080`, exposed on Kind node interfaces.
-Issue #21 should map node port `30080` to host `127.0.0.1`. Until then, use a
-loopback-only port-forward for direct manifest testing:
-
-```sh
-kubectl -n floor-control port-forward --address 127.0.0.1 \
-  svc/floor-control-api 4000:4000
-```
+The API Service remains a NodePort on `30080`, mapped by the supported script
+to host `127.0.0.1` (host port `4000` by default). Use the protected inspection
+block in the root README for status, logs, and endpoint checks; it passes the
+standalone kubeconfig explicitly on every kubectl invocation. The create script
+also prints the reachable API, Swagger, and OpenAPI URLs.
 
 The static hostPath PV needs no storage-class installation, preserves data
 across PostgreSQL Pod recreation, and is deleted with the Kind node/cluster. It
