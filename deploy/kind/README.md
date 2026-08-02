@@ -10,6 +10,41 @@ It is not a registry digest. Issue #21 must render a temporary copy using one
 immutable `kind-<git-sha>` tag, load that exact tag into Kind, and use the same
 rendered tag for the migration Job and API Deployment.
 
+## Automated lifecycle (issue #21)
+
+From the repository root, the supported local lifecycle is:
+
+```sh
+scripts/create-and-deploy-in-kind.sh
+scripts/verify-kind-deployment.sh
+scripts/delete-kindly.sh
+```
+
+The create script requires Docker, Kind, kubectl, openssl, curl, and git. It
+builds and loads one immutable `floor-control-api:kind-<committed-sha>` image,
+maps the NodePort to `127.0.0.1`, waits for PostgreSQL and migrations, and
+prints loopback API/Swagger/OpenAPI URLs. `KIND_CLUSTER`, `KIND_NAMESPACE`,
+`KIND_HOST_PORT`, `KIND_NODE_PORT`, and `KIND_NODE_IMAGE` are overridable.
+The node-image override must remain digest-pinned (`name@sha256:<64 hex>`).
+Untracked files and documentation changes are allowed; tracked image or Kind
+manifest changes must be committed before an image deployment. Reruns retain
+the Secret, PVC, and PostgreSQL data. Deletion is intentional and removes the
+named cluster and its local data only after verifying the automation ownership
+marker in `kube-system`; a same-name unowned cluster is refused.
+
+The default API port is `4000`; if Compose is running, use a free alternate
+port such as `KIND_HOST_PORT=4001`. The script preserves the user's kubeconfig
+context by using a protected temporary kubeconfig and prints an explicit
+`kind export kubeconfig` command for later inspection.
+Deletion uses its own protected temporary kubeconfig and removes its temporary
+log directory on normal exit, timeout, or interruption.
+
+Automation-created Secrets are labeled as managed Floor Control resources and
+must contain all three required keys on reuse. An unlabeled or incomplete
+pre-automation Secret is rejected rather than silently adopted. A custom
+namespace is also rejected if the cluster-global `postgres-data` PV is already
+claimed by another namespace.
+
 ## First-run credentials and foundation
 
 Namespace creation must precede Secret creation. On a fresh cluster, generate
@@ -33,7 +68,7 @@ else
   openssl rand -hex 64 >"$secret_dir/SECRET_KEY_BASE"
   chmod 600 "$secret_dir"/*
   password="$(<"$secret_dir/POSTGRES_PASSWORD")"
-  printf 'ecto://floor_control:%s@postgres:5432/floor_control\n' "$password" \
+  printf 'ecto://floor_control:%s@postgres:5432/floor_control' "$password" \
     >"$secret_dir/DATABASE_URL"
   chmod 600 "$secret_dir/DATABASE_URL"
 
@@ -78,7 +113,8 @@ if kubectl -n floor-control get job floor-control-migrate >/dev/null 2>&1; then
     fi
   fi
 
-  # Always recreate the fixed-name Job so this release runs pending migrations.
+  # The automation retains a completed Job for the same immutable image. A
+  # failed Job or a completed Job for an older image is replaced.
   kubectl -n floor-control delete job floor-control-migrate \
     --ignore-not-found --wait=true
 fi
@@ -94,11 +130,11 @@ kubectl -n floor-control rollout status deployment/floor-control-api --timeout=1
 Job pod templates are immutable. Every new deployment waits for an existing
 active Job to complete successfully. After a wait failure, only a Job with a
 terminal Failed condition is deleted; active, unknown, and timed-out Jobs are
-left in place and stop the lifecycle. Completed and terminal-failed Jobs are
-then recreated before applying the current migration kustomization. Ecto skips
-migration versions already recorded in the database, so this safely runs
-pending migrations on every deployment. Issue #21 must apply the same lifecycle
-after rendering the immutable Git-SHA image tag.
+left in place and stop the lifecycle. A completed Job for the same immutable
+image is retained on an idempotent rerun. Terminal-failed Jobs and completed
+Jobs for an older image are recreated before applying the current migration
+kustomization. Ecto skips migration versions already recorded in the database,
+and a new immutable image triggers the pending-migration Job.
 
 ## Access and persistence
 
