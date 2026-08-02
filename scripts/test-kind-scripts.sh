@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 root="$(git rev-parse --show-toplevel)"
 cd "$root"
+command -v ps >/dev/null 2>&1 || { printf 'ERROR: ps is required\n' >&2; exit 1; }
 create="scripts/create-and-deploy-in-kind.sh"
 delete="scripts/delete-kindly.sh"
 verify="scripts/verify-kind-deployment.sh"
@@ -55,6 +56,37 @@ grep -q 'intentional Secret lookup failure' "$verify_output"
 grep -q 'get secret floor-control-secrets' "$verify_lookup"
 [[ -z "$(compgen -G "$verify_tmp/floor-control-kind-verify.*" || true)" ]]
 [[ ! -e "$verify_tmp/kubeconfig" ]]
+for executable in bash git mktemp chmod rm; do
+  ln -s "$(command -v "$executable")" "$verify_fixture/$executable"
+done
+cat >"$verify_fixture/curl" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod 700 "$verify_fixture/curl"
+verify_output_ps="$tmp_dir/verify-output-ps"
+if TMPDIR="$verify_tmp" PATH="$verify_fixture" "$verify" >"$verify_output_ps" 2>&1; then
+  printf 'ERROR: verify unexpectedly passed missing ps preflight\n' >&2
+  exit 1
+fi
+grep -q 'ps is required' "$verify_output_ps"
+rm -f "$verify_fixture/bash" "$verify_fixture/git" "$verify_fixture/mktemp" "$verify_fixture/chmod" "$verify_fixture/rm" "$verify_fixture/curl"
+
+for executable in bash git mktemp chmod rm ps; do
+  ln -s "$(command -v "$executable")" "$verify_fixture/$executable"
+done
+cat >"$verify_fixture/curl" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod 700 "$verify_fixture/curl"
+verify_output_pgrep="$tmp_dir/verify-output-pgrep"
+if TMPDIR="$verify_tmp" PATH="$verify_fixture" "$verify" >"$verify_output_pgrep" 2>&1; then
+  printf 'ERROR: verify unexpectedly passed missing pgrep preflight\n' >&2
+  exit 1
+fi
+grep -q 'pgrep is required' "$verify_output_pgrep"
+rm -f "$verify_fixture/bash" "$verify_fixture/git" "$verify_fixture/mktemp" "$verify_fixture/chmod" "$verify_fixture/rm" "$verify_fixture/ps" "$verify_fixture/curl"
 
 expect_failure() {
   if "$@" >"$output" 2>&1; then
@@ -105,9 +137,135 @@ grep -q 'marker="kind-acceptance-\$\$"' "$verify"
 if grep -F -q '${$}' "$verify"; then exit 1; fi
 grep -q 'kind delete cluster --name "$cluster"' "$delete"
 grep -q 'KIND_DELETE_TIMEOUT_SECONDS' "$delete"
-grep -q 'request-timeout=30s' "$library"
 grep -q 'kind get kubeconfig' "$verify"
 grep -q 'wait_for_api_marker' "$verify"
+grep -q 'create_postgres_persistence_marker' "$verify"
+grep -q 'cleanup_postgres_persistence_marker' "$verify"
+grep -q 'postgres_kube()' "$library"
+grep -q 'pgrep is required' "$verify"
+grep -q 'request-timeout=5s' "$library"
+grep -q 'run_with_timeout 190 kubewatch' "$verify"
+grep -q -- '--timeout=180s' "$verify"
+grep -q 'for attempt in {1..9}' "$verify"
+! grep -q 'kubewatch() .*request-timeout' "$library"
+
+(
+  set -Eeuo pipefail
+  source "$library"
+  kubeconfig=test-kubeconfig
+  kubectl() { printf '%s\n' "$*" >"$behavior_dir/kubectl-timeout-call"; }
+  kubewatch wait --for=condition=ready pod/postgres-0 --timeout=180s
+  grep -q -- '--kubeconfig test-kubeconfig wait --for=condition=ready pod/postgres-0 --timeout=180s' "$behavior_dir/kubectl-timeout-call"
+  ! grep -q -- '--request-timeout' "$behavior_dir/kubectl-timeout-call"
+  postgres_kube exec postgres-0 -- true
+  grep -q -- '--request-timeout=5s exec postgres-0 -- true' "$behavior_dir/kubectl-timeout-call"
+)
+
+timeout_fixture="$behavior_dir/timeout-fixture"
+timeout_child_pid="$behavior_dir/timeout-child.pid"
+cat >"$timeout_fixture" <<EOF
+#!/usr/bin/env bash
+trap '' TERM
+(trap '' TERM; sleep 30) &
+printf '%s\n' "\$!" >"$timeout_child_pid"
+wait
+EOF
+chmod 700 "$timeout_fixture"
+if (
+  set -Eeuo pipefail
+  source "$library"
+  run_with_timeout 1 "$timeout_fixture"
+); then
+  printf 'ERROR: TERM-ignoring timeout fixture unexpectedly passed\n' >&2
+  exit 1
+else
+  [[ "$?" == 124 ]]
+fi
+timeout_child="$(<"$timeout_child_pid")"
+if kill -0 "$timeout_child" 2>/dev/null; then
+  printf 'ERROR: outer timeout left a descendant alive\n' >&2
+  exit 1
+fi
+
+(
+  set -Eeuo pipefail
+  source "$library"
+  kubeconfig=test-kubeconfig
+  kubectl() { return 124; }
+  if run_with_timeout 1 kubewatch wait --for=condition=ready pod/postgres-0 --timeout=180s; then
+    exit 1
+  else
+    [[ "$?" == 124 ]]
+  fi
+)
+
+(
+  set -Eeuo pipefail
+  source "$library"
+  NAMESPACE=test
+  postgres_marker_created=0
+  postgres_calls="$behavior_dir/postgres-marker-calls"
+  postgres_kube() {
+    printf '%s\n' "$*" >>"$postgres_calls"
+    case "$*" in
+      *'SELECT marker FROM "kind_acceptance_123";'*) printf 'postgres-persistence-kind-acceptance-123\n' ;;
+      *) : ;;
+    esac
+  }
+  create_postgres_persistence_marker kind-acceptance-123
+  check_postgres_persistence_marker
+  cleanup_postgres_persistence_marker
+  grep -q 'CREATE TABLE "kind_acceptance_123"' "$postgres_calls"
+  grep -q 'BEGIN; CREATE TABLE' "$postgres_calls"
+  grep -q 'COMMIT;' "$postgres_calls"
+  grep -q 'statement_timeout=10000' "$postgres_calls"
+  grep -q 'lock_timeout=5000' "$postgres_calls"
+  grep -q 'DROP TABLE IF EXISTS "kind_acceptance_123"' "$postgres_calls"
+  [[ -z "$postgres_marker_table" && -z "$postgres_marker_value" ]]
+  [[ "$postgres_marker_created" == 0 ]]
+)
+
+if (
+  set -Eeuo pipefail
+  source "$library"
+  NAMESPACE=test
+  postgres_calls="$behavior_dir/postgres-collision-calls"
+  postgres_kube() {
+    printf '%s\n' "$*" >>"$postgres_calls"
+    return 17
+  }
+  if create_postgres_persistence_marker kind-acceptance-456; then exit 1; fi
+  postgres_marker_created=0
+  cleanup_postgres_persistence_marker
+  ! grep -q 'DROP TABLE' "$postgres_calls"
+  [[ -z "$postgres_marker_table" && -z "$postgres_marker_value" ]]
+); then
+  printf 'ERROR: failed PostgreSQL marker creation attempted cleanup DROP\n' >&2
+  exit 1
+fi
+
+if (
+  set -Eeuo pipefail
+  source "$library"
+  NAMESPACE=test
+  postgres_marker_table='kind_acceptance_123'
+  postgres_marker_value='postgres-persistence-kind-acceptance-123'
+  postgres_marker_created=1
+  postgres_kube() { return 17; }
+  cleanup_postgres_persistence_marker
+  [[ -z "$postgres_marker_table" && -z "$postgres_marker_value" ]]
+  [[ "$postgres_marker_created" == 0 ]]
+); then
+  :
+else
+  printf 'ERROR: PostgreSQL marker cleanup did not remain best-effort\n' >&2
+  exit 1
+fi
+
+if create_postgres_persistence_marker 'kind-acceptance-bad;drop' 2>/dev/null; then
+  printf 'ERROR: PostgreSQL marker accepted an unsafe identifier\n' >&2
+  exit 1
+fi
 
 (
   set -Eeuo pipefail

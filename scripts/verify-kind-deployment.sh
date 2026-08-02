@@ -7,9 +7,15 @@ tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/floor-control-kind-verify.XXXXXX")"
 chmod 700 "$tmp_root"
 marker=""
 marker_created=0
+postgres_marker_table=""
+postgres_marker_value=""
+postgres_marker_created=0
 cleanup_marker() {
   if (( marker_created )); then
     curl --fail --silent --show-error --max-time 5 -X DELETE "$base/groups/$marker/floor/acceptance-marker" >/dev/null 2>&1 || true
+  fi
+  if declare -F cleanup_postgres_persistence_marker >/dev/null 2>&1; then
+    cleanup_postgres_persistence_marker
   fi
   if [[ -d "$tmp_root" ]]; then rm -rf -- "$tmp_root"; fi
 }
@@ -26,12 +32,14 @@ image="floor-control-api:kind-$(git rev-parse HEAD)"
 command -v curl >/dev/null 2>&1 || { printf 'ERROR: curl is required\n' >&2; exit 1; }
 command -v kubectl >/dev/null 2>&1 || { printf 'ERROR: kubectl is required\n' >&2; exit 1; }
 command -v kind >/dev/null 2>&1 || { printf 'ERROR: kind is required\n' >&2; exit 1; }
+command -v ps >/dev/null 2>&1 || { printf 'ERROR: ps is required\n' >&2; exit 1; }
+command -v pgrep >/dev/null 2>&1 || { printf 'ERROR: pgrep is required\n' >&2; exit 1; }
 kubeconfig="$tmp_root/kubeconfig"
 kind get kubeconfig --name "$cluster" >"$kubeconfig"
 chmod 600 "$kubeconfig"
 source "$root/scripts/kind-lifecycle-functions.sh"
+NAMESPACE="$namespace"
 kube() { kubectl --kubeconfig "$kubeconfig" --request-timeout=30s "$@"; }
-kubewatch() { kubectl --kubeconfig "$kubeconfig" "$@"; }
 base="http://127.0.0.1:$host_port"
 secret_uid="$(kube -n "$namespace" get secret floor-control-secrets -o jsonpath='{.metadata.uid}')"
 job_uid="$(kube -n "$namespace" get job floor-control-migrate -o jsonpath='{.metadata.uid}')"
@@ -56,21 +64,21 @@ curl --fail --silent --show-error --max-time 5 "$base/groups/$marker/floor" | gr
 [[ "$(kube -n "$namespace" get deployment floor-control-api -o jsonpath='{.spec.template.spec.containers[0].image}')" == "$image" ]] || { printf 'ERROR: API image does not match %s\n' "$image" >&2; exit 1; }
 [[ "$(kube -n "$namespace" get secret floor-control-secrets -o jsonpath='{.metadata.uid}')" != "" ]] || { printf 'ERROR: deployment Secret is absent\n' >&2; exit 1; }
 kube -n "$namespace" delete pod "$(kube -n "$namespace" get pods -l app.kubernetes.io/name=floor-control-api -o jsonpath='{.items[0].metadata.name}')" --wait=false >/dev/null
-kubewatch -n "$namespace" wait --for=condition=available deployment/floor-control-api --timeout=180s >/dev/null
+run_with_timeout 190 kubewatch -n "$namespace" wait --for=condition=available deployment/floor-control-api --timeout=180s >/dev/null
 if ! wait_for_api_marker "$base" "$marker" 36 5; then
   printf 'ERROR: marker did not survive API replacement after bounded API recovery retries\n' >&2
   exit 1
 fi
+create_postgres_persistence_marker "$marker" || { printf 'ERROR: could not create PostgreSQL persistence marker\n' >&2; exit 1; }
 kube -n "$namespace" delete pod postgres-0 --wait=false >/dev/null
-kubewatch -n "$namespace" wait --for=condition=ready pod/postgres-0 --timeout=180s >/dev/null
+run_with_timeout 190 kubewatch -n "$namespace" wait --for=condition=ready pod/postgres-0 --timeout=180s >/dev/null
 marker_restored=0
-for attempt in {1..36}; do
-  if curl --fail --silent --show-error --max-time 5 "$base/ready" >/dev/null 2>&1 &&
-    curl --fail --silent --show-error --max-time 5 "$base/groups/$marker/floor" | grep -q 'acceptance-marker'; then
+for attempt in {1..9}; do
+  if check_postgres_persistence_marker; then
     marker_restored=1
     break
   fi
   sleep 5
 done
-(( marker_restored == 1 )) || { printf 'ERROR: persistence marker did not survive PostgreSQL Pod replacement\n' >&2; exit 1; }
+(( marker_restored == 1 )) || { printf 'ERROR: PostgreSQL persistence marker did not survive Pod replacement\n' >&2; exit 1; }
 printf 'Kind acceptance checks passed: endpoints, readiness, one API replica, immutable image, completed migration, Secret reuse, and PostgreSQL Pod persistence.\n'

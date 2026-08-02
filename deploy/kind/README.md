@@ -20,7 +20,9 @@ scripts/verify-kind-deployment.sh
 scripts/delete-kindly.sh
 ```
 
-The create script requires Docker, Kind, kubectl, openssl, curl, git, and pgrep.
+The lifecycle scripts require Docker, Kind, kubectl, openssl, curl, git, pgrep,
+and `ps`. The verifier uses `ps` to detect and reap completed timeout
+processes.
 It builds and loads one immutable `floor-control-api:kind-<committed-sha>` image,
 maps the NodePort to `127.0.0.1`, waits for PostgreSQL and migrations, and
 prints loopback API/Swagger/OpenAPI URLs. `KIND_CLUSTER`, `KIND_NAMESPACE`,

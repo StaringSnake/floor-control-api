@@ -2,11 +2,125 @@
 
 ## Status
 
-**Implementation and runtime verification complete; reviewed and ready for
-publication.** The user
+**Implementation and runtime verification complete; fully reviewed and ready
+for publication.** The user
 explicitly authorized downloading the official Kind binary into a protected
-temporary directory for this run. No commit, push, issue comment, or issue
-closure was performed.
+temporary directory for this run. The correction references issue #23 without
+closing it; post-merge clean-checkout acceptance remains required.
+
+## Clean-checkout acceptance follow-up (issue #23)
+
+The subsequent clean-checkout acceptance failed only at the PostgreSQL Pod
+replacement check: the API floor-holder marker was absent after recovery. The
+runtime evidence included PostgreSQL DNS/connection outage logs and timeout
+sweep releases. This is expected domain behavior, not proof of volume data
+loss: the configured floor timeout is 30 seconds, the worker sweeps at half
+that interval, and `Floors.expire_expired/2` deletes expired ownership rows.
+The API marker is consequently a valid API Pod replacement witness but not a
+durable PostgreSQL storage witness after a recovery window.
+
+The verifier-only correction keeps the API marker check unchanged and creates
+a uniquely named acceptance table/row immediately before PostgreSQL Pod
+replacement. It checks that exact row with bounded in-pod `psql` retries, then
+drops the table best-effort from the exit trap. The generated identifier is
+strictly validated and SQL identifiers are double-quoted; the generated marker
+literal is SQL-quoted before being passed to `psql`. The command uses the Pod's
+database environment for password authentication
+inside the Pod, so no credential is read, printed, or committed. Deterministic
+tests cover command construction, unsafe identifier rejection, successful
+check, and cleanup despite an exec failure.
+
+This follow-up required a current-tree Kind rerun from a clean checkout with
+the previously authorized, checksum-verified temporary Kind v0.32.0 binary.
+Review routing remains general engineering, security, and performance.
+
+### Follow-up verification result
+
+The current-tree runtime rerun passed with the checksum-verified temporary
+Kind v0.32.0 binary, including same-image rerun, API Pod replacement,
+PostgreSQL Pod replacement, and the direct PostgreSQL marker check. The named
+cluster was deleted twice and the temporary binary was removed. Compose API/DB
+remained healthy on port 4000. The local `mix test` command was also attempted
+but is not an acceptance blocker for this verifier-only change: the repository
+test configuration targets `localhost:5432`, while the preserved Compose DB
+does not publish that port; 60 database-backed tests failed to connect and 16
+non-database tests passed. The deterministic Kind script suite passed.
+
+### Aggregated security/performance finding dispositions
+
+- **Marker ownership/collision (security correctness): fixed.** The verifier
+  now publishes table/value state and sets `postgres_marker_created=1` only
+  after the `CREATE TABLE` plus insert command succeeds. Cleanup drops only
+  when that ownership flag is set, and always resets all marker state. A
+  deterministic simulated collision/create failure proves cleanup emits no
+  `DROP TABLE`, so an existing table cannot be removed.
+- **Kubernetes wait transport bound (performance reliability): revised.** The
+  verifier does not impose a premature request timeout on `kubewatch`; it
+  retains `wait --timeout=180s` and uses the shared 190-second outer process
+  timeout. A fake-kubectl test asserts the absence of a transport cap and the
+  exact outer/inner wait budgets.
+- **PostgreSQL retry duration (performance): fixed.** Marker create/check/drop
+  use a dedicated `postgres_kube` wrapper with `--request-timeout=5s`, rather
+  than the generic 30-second request bound. The nine-attempt loop allows
+  five seconds of recovery delay per retry: at most approximately 175 seconds
+  for marker polling, plus the explicit 180-second Pod readiness wait. The
+  deterministic suite verifies the 5-second wrapper and exact marker retry
+  behavior remains bounded.
+
+### Final outer-bound re-review
+
+The earlier 30-second `kubectl` request bound was insufficient because it
+could interrupt a legitimate 180-second condition wait. The final design
+removes that request bound from verifier `kubewatch` calls and wraps each
+long wait in the shared `run_with_timeout` process-tree helper. The deployment
+and PostgreSQL readiness waits retain `kubectl wait --timeout=180s` and have a
+190-second outer budget, allowing ten seconds for orderly process-tree
+termination/reaping. The helper targets only the spawned PID and descendants;
+it sends TERM, waits two seconds, then KILLs remaining descendants and reaps
+the root. A success, a normal nonzero wait, and a TERM-ignoring descendant are
+covered without long test sleeps.
+
+Marker creation now sends one explicit `BEGIN; CREATE TABLE; INSERT; COMMIT;`
+command with `ON_ERROR_STOP=1`, so table creation and row insertion commit
+together. The marker state is published only after that command succeeds.
+Marker create/check/cleanup execs each have a 15-second outer budget, a
+5-second kubectl request bound, `PGCONNECT_TIMEOUT=5`, `statement_timeout=10s`,
+and `lock_timeout=5s`. Cleanup remains best-effort but is bounded. The
+  polling budget is nine attempts with five-second delays: at most about 175
+  seconds after the explicit 180-second readiness wait.
+
+Final deterministic and runtime validation passed. Runtime acceptance observed
+one transient Kubernetes exec-stream error while the replacement container
+was settling, then succeeded within the bounded retry budget. The PostgreSQL
+marker was removed after acceptance, confirming cleanup. Pending re-review is
+limited to the general engineering, security, and performance reviewers.
+
+The final deterministic command `scripts/test-kind-scripts.sh` exited with
+status **0**. It now asserts no request timeout on the 180-second waits, the
+190-second outer wrapper, the nine-attempt PostgreSQL budget, missing-`ps`
+preflight failure, and missing-`pgrep` preflight failure. Bash syntax,
+Kustomize rendering, manual secret scan, and `git diff --check` also exited
+successfully.
+
+The final general finding was resolved by adding an explicit `pgrep` preflight
+to `verify-kind-deployment.sh`, matching the process-tree cleanup dependency
+already checked by create/delete and documented in both lifecycle READMEs.
+
+### Final review and acceptance disposition
+
+- General engineering review: **APPROVE**; scope, evidence, ownership state,
+  and cleanup behavior were reviewed after the final `pgrep` preflight fix.
+- Security review: **APPROVE**; SQL quoting, transaction atomicity, credential
+  boundaries, temporary files, and executable prerequisites were reviewed.
+- Performance review: **APPROVE**; the 190-second outer wait budget, 15-second
+  bounded database operations, nine-attempt PostgreSQL recovery budget, and
+  no-premature-transport-timeout design were reviewed.
+- Acceptance verifier: **BLOCKED by tool policy** from independent runtime
+  execution, but statically confirmed all acceptance criteria. Operator fresh
+  runtime and deterministic evidence are authoritative for this run.
+- Post-merge requirement: rerun the complete clean-checkout issue #23
+  acceptance after merge. Issue #23 must remain open until that evidence is
+  recorded.
 
 ## Root cause and decision
 
@@ -27,9 +141,12 @@ bound.
 - `scripts/kind-lifecycle-functions.sh`
 - `scripts/verify-kind-deployment.sh`
 - `scripts/test-kind-scripts.sh`
+- `README.md`
+- `deploy/kind/README.md`
 - This journal.
 
-No user guidance changed, so README/deployment documentation was not edited.
+README and `deploy/kind/README.md` document the `ps` prerequisite used by the
+verifier's timeout helper.
 
 ## Deterministic coverage
 
@@ -126,8 +243,9 @@ that temporary directory was prepended to `PATH`; the unverified global
   finding was fixed and the contradiction was investigated.
 - Security review: **APPROVE**, selected for external binary provenance,
   protected temporary files, lifecycle input, and Secret boundaries.
-- Performance review: **APPROVE**, selected for bounded retry loops and wait
-  behavior; the helper remains finite at 36 attempts with bounded curl/sleep
+- Performance review: **APPROVE**, selected for the shared outer process-tree
+  timeout, `ps`/`pgrep` prerequisites, and nine-attempt PostgreSQL recovery
+  budget. The API marker retry remains 36 attempts with bounded curl/sleep
   intervals.
 - Acceptance verifier: **BLOCKED by tool policy** from independently executing
   the scripts. Its review of the bounded logic and preserved checks was
