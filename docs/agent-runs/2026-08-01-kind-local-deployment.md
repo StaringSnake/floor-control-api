@@ -404,3 +404,20 @@ review findings resolved; commit/merge remains.
   Docker/Kubernetes access is required for marker authenticity; deletion
   intentionally destroys cluster-local PostgreSQL data; same-image reruns
   conservatively rebuild and load the image.
+
+## Publication evidence (2026-08-02)
+
+- Branch: `feature/automate-kind-deployment` (tracking
+  `origin/feature/automate-kind-deployment`).
+- Implementation commit: `6f76ae1` (`Automate local Kind deployment lifecycle`).
+- Pull request: [#27](https://github.com/StaringSnake/floor-control-api/pull/27),
+  targeting `main`, with `Closes #21`.
+- Required GitHub Actions check `verify`: **PASS** (run
+  [30746525925](https://github.com/StaringSnake/floor-control-api/actions/runs/30746525925));
+  format/compile/test, production image build, smoke test, and OpenAPI lint
+  all passed.
+- Local deterministic Kind script checks, Bash syntax, `git diff --check`, and
+  the staged secret-looking literal scan passed before publication.
+- Merge: pending required publication step at the time this journal was
+  committed. Issue #21 remains open until the PR is merged; issues #22 and #23
+  are intentionally unchanged.
