@@ -24,6 +24,91 @@ configured value. PostgreSQL is persisted in the `postgres_data` Compose volume.
 Stop the stack with `docker compose down`; add
 `-v` when intentionally removing the local database.
 
+### Local Kind deployment
+
+This is a disposable, local-only demo deployment. It requires Docker with at
+least 4 GB allocated memory, Kind, kubectl, OpenSSL, curl, git, and `pgrep`.
+Run the lifecycle scripts from the repository root. The create script requires
+the image and Kind manifest inputs to be committed, then builds the current
+`HEAD`, loads the immutable `floor-control-api:kind-<git-sha>` image into Kind,
+runs the migration Job, and starts exactly one API replica:
+
+```sh
+scripts/create-and-deploy-in-kind.sh
+curl --fail http://127.0.0.1:4000/ready
+scripts/verify-kind-deployment.sh
+```
+
+The script prints API, Swagger, OpenAPI, status, and log commands. The default
+loopback mapping is `127.0.0.1:4000` (NodePort `30080`); Compose also uses port
+4000, so stop Compose or choose a free port:
+
+```sh
+KIND_HOST_PORT=4001 scripts/create-and-deploy-in-kind.sh
+KIND_HOST_PORT=4001 scripts/verify-kind-deployment.sh
+```
+
+The lifecycle scripts do not modify the user's kubeconfig. For inspection,
+create a protected standalone kubeconfig and remove it when finished:
+
+```sh
+(
+  set -eu
+  inspect_dir="$(mktemp -d "${TMPDIR:-/tmp}/floor-control-kind-inspect.XXXXXX")"
+  chmod 700 "$inspect_dir"
+  trap 'rm -rf -- "$inspect_dir"' EXIT
+  inspect_cluster="${KIND_CLUSTER:-floor-control}"
+  inspect_namespace="${KIND_NAMESPACE:-floor-control}"
+  inspect_host_port="${KIND_HOST_PORT:-4000}"
+  inspect_context="kind-${inspect_cluster}"
+  inspect_kubeconfig="$inspect_dir/kubeconfig"
+  kind get kubeconfig --name "$inspect_cluster" >"$inspect_kubeconfig"
+  chmod 600 "$inspect_kubeconfig"
+  kubectl --kubeconfig "$inspect_kubeconfig" --context "$inspect_context" \
+    -n "$inspect_namespace" get pods,job,pvc
+  kubectl --kubeconfig "$inspect_kubeconfig" --context "$inspect_context" \
+    -n "$inspect_namespace" logs deployment/floor-control-api
+  kubectl --kubeconfig "$inspect_kubeconfig" --context "$inspect_context" \
+    -n "$inspect_namespace" logs job/floor-control-migrate
+  curl --fail "http://127.0.0.1:${inspect_host_port}/"
+  curl --fail "http://127.0.0.1:${inspect_host_port}/swagger"
+  curl --fail "http://127.0.0.1:${inspect_host_port}/openapi.yaml"
+)
+```
+
+The script creates `floor-control-secrets` once using protected temporary
+files, prints no credential values, and reuses the managed Secret and PVC on
+reruns. Do not rotate the Secret during a normal rerun; password rotation
+requires a coordinated PostgreSQL operation. The immutable image tag is
+rebuilt and loaded for each committed `HEAD`; the migration Job is retained
+when that exact image already completed and is recreated for an older or
+terminal-failed Job. Active, unknown, or timed-out Jobs are not deleted
+automatically. Inspect status/logs and resolve the reported condition before
+retrying a failed deployment.
+
+PostgreSQL data survives Pod recreation but is intentionally lost when the
+Kind cluster is deleted. Deletion is explicit and destructive:
+
+```sh
+KIND_CLUSTER=floor-control scripts/delete-kindly.sh
+```
+
+The delete script refuses a same-name cluster without the Floor Control
+ownership marker, removes only that cluster and its local data, and is safe to
+run again when the cluster is already absent. If creation or deletion times
+out, inspect the reported named cluster, verify ownership, and retry; do not
+delete an unfamiliar cluster. `KIND_CLUSTER`, `KIND_NAMESPACE`,
+`KIND_HOST_PORT`, `KIND_NODE_PORT`, and digest-pinned `KIND_NODE_IMAGE` can be
+overridden; see [`deploy/kind/README.md`](deploy/kind/README.md) for details.
+
+Kind is not production: it uses one node, local hostPath persistence,
+in-cluster PostgreSQL without production backup/failover, and one API replica
+because timeout coordination is not distributed. Keep secrets and
+environment-specific values outside the repository and image. For
+troubleshooting/recovery, start with the printed status and log commands,
+preserve active migration Jobs, and retry only after the failing condition is
+understood.
+
 ### API endpoints
 
 The API contract and interactive documentation are available without internet
