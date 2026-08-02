@@ -29,6 +29,7 @@ command -v kind >/dev/null 2>&1 || { printf 'ERROR: kind is required\n' >&2; exi
 kubeconfig="$tmp_root/kubeconfig"
 kind get kubeconfig --name "$cluster" >"$kubeconfig"
 chmod 600 "$kubeconfig"
+source "$root/scripts/kind-lifecycle-functions.sh"
 kube() { kubectl --kubeconfig "$kubeconfig" --request-timeout=30s "$@"; }
 kubewatch() { kubectl --kubeconfig "$kubeconfig" "$@"; }
 base="http://127.0.0.1:$host_port"
@@ -56,7 +57,10 @@ curl --fail --silent --show-error --max-time 5 "$base/groups/$marker/floor" | gr
 [[ "$(kube -n "$namespace" get secret floor-control-secrets -o jsonpath='{.metadata.uid}')" != "" ]] || { printf 'ERROR: deployment Secret is absent\n' >&2; exit 1; }
 kube -n "$namespace" delete pod "$(kube -n "$namespace" get pods -l app.kubernetes.io/name=floor-control-api -o jsonpath='{.items[0].metadata.name}')" --wait=false >/dev/null
 kubewatch -n "$namespace" wait --for=condition=available deployment/floor-control-api --timeout=180s >/dev/null
-curl --fail --silent --show-error --max-time 5 "$base/groups/$marker/floor" | grep -q 'acceptance-marker' || { printf 'ERROR: marker did not survive API replacement\n' >&2; exit 1; }
+if ! wait_for_api_marker "$base" "$marker" 36 5; then
+  printf 'ERROR: marker did not survive API replacement after bounded API recovery retries\n' >&2
+  exit 1
+fi
 kube -n "$namespace" delete pod postgres-0 --wait=false >/dev/null
 kubewatch -n "$namespace" wait --for=condition=ready pod/postgres-0 --timeout=180s >/dev/null
 marker_restored=0
