@@ -2,11 +2,9 @@
 
 ## Status
 
-**Implementation and runtime verification complete; fully reviewed and ready
-for publication.** The user
-explicitly authorized downloading the official Kind binary into a protected
-temporary directory for this run. The correction references issue #23 without
-closing it; post-merge clean-checkout acceptance remains required.
+**Completed.** Final post-merge clean-checkout acceptance passed all eight issue
+#23 criteria with no gaps. The user explicitly authorized the journal-only
+closeout publication, merge, and ticket completion.
 
 ## Clean-checkout acceptance follow-up (issue #23)
 
@@ -261,8 +259,37 @@ The verified temporary binary was removed after runtime verification. The
 idempotently, port 4001 was free, and the global kubeconfig and Docker
 settings were not changed. Compose API/DB remained healthy on port 4000.
 
-## Next action
+## Final post-merge clean-checkout acceptance
 
-Review and publish the scoped change. The PR references issue #23 without
-closing it. Do not close issue #23 until final clean-checkout aggregate
-acceptance is rerun after merge.
+The acceptance verifier verdict is **ACCEPT**. All eight issue #23 criteria
+passed with no gaps on a fresh clean checkout:
+
+- official checksum-verified temporary Kind binary was used;
+- Swagger/OpenAPI returned HTTP 200;
+- PostgreSQL and one API Pod became ready;
+- migration ordering was verified;
+- the API was reached through the loopback NodePort;
+- API Pod replacement and PostgreSQL Pod replacement both preserved the
+  expected persistence evidence;
+- same-image reuse was safe;
+- no marker tables remained after cleanup;
+- deletion and repeated deletion were idempotent;
+- README commands passed;
+- no repository artifacts were left;
+- preserved Compose API/DB services remained healthy; and
+- no secrets were disclosed.
+
+The acceptance evidence was collected after the code-bearing PR #30 had been
+merged, from a fresh clean checkout of the resulting main branch. The checked
+out tree was clean before and after verification. The named Kind cluster was
+deleted, deletion was repeated to prove idempotence, and the temporary Kind
+binary was removed. Compose remained healthy on port 4000 and no generated
+artifacts remained in the repository.
+
+The code-bearing PR #30 had final general engineering, security, and
+performance review verdicts of **APPROVE**. This journal-only closeout changes
+no product or operational behavior, so no new conditional review was needed.
+
+Residual non-blockers are limited to local Kind/Docker compatibility and the
+intentional destructive deletion of the temporary verification cluster.
+Issue #23 is therefore complete and may be closed by the merged closeout PR.
