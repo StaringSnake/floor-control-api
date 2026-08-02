@@ -107,6 +107,63 @@ grep -q 'kind delete cluster --name "$cluster"' "$delete"
 grep -q 'KIND_DELETE_TIMEOUT_SECONDS' "$delete"
 grep -q 'request-timeout=30s' "$library"
 grep -q 'kind get kubeconfig' "$verify"
+grep -q 'wait_for_api_marker' "$verify"
+
+(
+  set -Eeuo pipefail
+  source "$library"
+  marker_state="$behavior_dir/transient-marker-calls"
+  printf '0\n' >"$marker_state"
+  curl() {
+    [[ "$#" -eq 6 && "$1" == '--fail' && "$2" == '--silent' && "$3" == '--show-error' && "$4" == '--max-time' && "$5" == 5 ]] || return 92
+    local url="${!#}"
+    case "$url" in
+      *'/ready') return 0 ;;
+      *'/groups/test-marker/floor')
+        marker_calls="$(( $(<"$marker_state") + 1 ))"
+        printf '%s\n' "$marker_calls" >"$marker_state"
+        (( marker_calls >= 2 )) && printf 'acceptance-marker\n'
+        (( marker_calls >= 2 ))
+        ;;
+      *) return 91 ;;
+    esac
+  }
+  if curl --fail --silent --show-error --max-time 5 http://127.0.0.1/ready >/dev/null 2>&1 &&
+    curl --fail --silent --show-error --max-time 5 http://127.0.0.1/groups/test-marker/floor | grep -q 'acceptance-marker'; then
+    printf 'ERROR: immediate marker behavior unexpectedly passed\n' >&2
+    exit 1
+  fi
+  wait_for_api_marker http://127.0.0.1 test-marker 3 0
+  [[ "$(<"$marker_state")" == 2 ]]
+)
+
+if (
+  set -Eeuo pipefail
+  source "$library"
+  marker_state="$behavior_dir/persistent-marker-calls"
+  printf '0\n' >"$marker_state"
+  curl() {
+    [[ "$#" -eq 6 && "$1" == '--fail' && "$2" == '--silent' && "$3" == '--show-error' && "$4" == '--max-time' && "$5" == 5 ]] || return 92
+    local url="${!#}"
+    case "$url" in
+      *'/ready') return 0 ;;
+      *'/groups/test-marker/floor')
+        marker_calls="$(( $(<"$marker_state") + 1 ))"
+        printf '%s\n' "$marker_calls" >"$marker_state"
+        return 1
+        ;;
+      *) return 91 ;;
+    esac
+  }
+  if wait_for_api_marker http://127.0.0.1 test-marker 3 0; then
+    exit 1
+  fi
+  [[ "$(<"$marker_state")" == 3 ]] || exit 1
+  false
+); then
+  printf 'ERROR: persistent API marker failure unexpectedly passed\n' >&2
+  exit 1
+fi
 
 run_migration_case() {
   case_name="$1"

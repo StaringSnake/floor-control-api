@@ -34,6 +34,18 @@ terminate_process_tree() {
   wait "$root_pid" 2>/dev/null || true
 }
 
+wait_for_api_marker() {
+  local base_url="$1" marker="$2" attempts="$3" delay_seconds="$4" attempt
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
+    if curl --fail --silent --show-error --max-time 5 "$base_url/ready" >/dev/null 2>&1 &&
+      curl --fail --silent --show-error --max-time 5 "$base_url/groups/$marker/floor" | grep -q 'acceptance-marker'; then
+      return 0
+    fi
+    (( attempt == attempts )) || sleep "$delay_seconds"
+  done
+  return 1
+}
+
 validate_cluster_ownership() {
   local marker_name="floor-control-kind-ownership" managed_by cluster_name marker_version
   managed_by="$(kube -n kube-system get configmap "$marker_name" -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by}' 2>/dev/null || true)"
